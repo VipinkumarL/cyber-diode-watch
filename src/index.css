@@ -1,0 +1,304 @@
+/* SIH26145 — AI-Based Cyber Threat Detection Dashboard */
+/* Notebook Theme: dark paper with subtle grain, ruled lines, margin accents */
+
+@import "tailwindcss";
+@import "tw-animate-css";
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+  /* Notebook-specific tokens */
+  --color-notebook-paper: var(--notebook-paper);
+  --color-notebook-rule: var(--notebook-rule);
+  --color-notebook-margin: var(--notebook-margin);
+  --color-notebook-annotation: var(--notebook-annotation);
+  --color-notebook-ink: var(--notebook-ink);
+  --color-notebook-ink-dim: var(--notebook-ink-dim);
+  --color-notebook-highlight: var(--notebook-highlight);
+  --color-threat-critical: var(--threat-critical);
+  --color-threat-high: var(--threat-high);
+  --color-threat-medium: var(--threat-medium);
+  --color-threat-low: var(--threat-low);
+  --color-threat-normal: var(--threat-normal);
+  --color-status-active: var(--status-active);
+  --color-status-warning: var(--status-warning);
+}
+
+/* ── Dark Notebook Theme (default) ── */
+:root {
+  --radius: 0.5rem;
+  --background: #1a1a2e;
+  --foreground: #e8e6e3;
+  --card: #16213e;
+  --card-foreground: #e8e6e3;
+  --popover: #16213e;
+  --popover-foreground: #e8e6e3;
+  --primary: #0f3460;
+  --primary-foreground: #e8e6e3;
+  --secondary: #1a1a3e;
+  --secondary-foreground: #c4c1bb;
+  --muted: #1f2b47;
+  --muted-foreground: #8b8994;
+  --accent: #533483;
+  --accent-foreground: #e8e6e3;
+  --destructive: #e94560;
+  --border: #2a2a4a;
+  --input: #2a2a4a;
+  --ring: #533483;
+  --chart-1: #e94560;
+  --chart-2: #0f9b8e;
+  --chart-3: #f5a623;
+  --chart-4: #533483;
+  --chart-5: #48b9a7;
+  --sidebar: #12122a;
+  --sidebar-foreground: #e8e6e3;
+  --sidebar-primary: #0f3460;
+  --sidebar-primary-foreground: #e8e6e3;
+  --sidebar-accent: #1a1a3e;
+  --sidebar-accent-foreground: #e8e6e3;
+  --sidebar-border: #2a2a4a;
+  --sidebar-ring: #533483;
+
+  /* Notebook paper (dark) */
+  --notebook-paper: #1a1a2e;
+  --notebook-rule: #2a2a4a;
+  --notebook-margin: #e94560;
+  --notebook-annotation: #f5a623;
+  --notebook-ink: #e8e6e3;
+  --notebook-ink-dim: #8b8994;
+  --notebook-highlight: #53348330;
+
+  /* Threat severity colors */
+  --threat-critical: #e94560;
+  --threat-high: #f5a623;
+  --threat-medium: #0f9b8e;
+  --threat-low: #48b9a7;
+  --threat-normal: #6c7a89;
+  --status-active: #0f9b8e;
+  --status-warning: #f5a623;
+}
+
+/* ── Notebook grain texture overlay ── */
+body {
+  background-image:
+    url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.03'/%3E%3C/svg%3E");
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  button:not([disabled]),
+  [role="button"]:not([disabled]) {
+    cursor: pointer;
+  }
+}
+
+/* ── Notebook ruled-line card variant ── */
+.notebook-card {
+  background: linear-gradient(
+    180deg,
+    var(--card) 0%,
+    var(--card) 100%
+  );
+  background-size: 100% 2rem;
+  border-left: 3px solid var(--notebook-margin);
+  position: relative;
+}
+
+.notebook-card::before {
+  content: "";
+  position: absolute;
+  left: 24px;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--notebook-margin);
+  opacity: 0.25;
+}
+
+/* ── Ruled line separator ── */
+.notebook-rule {
+  border-bottom: 1px solid var(--notebook-rule);
+  background-image: repeating-linear-gradient(
+    transparent,
+    transparent calc(2rem - 1px),
+    var(--notebook-rule) calc(2rem - 1px),
+    var(--notebook-rule) 2rem
+  );
+}
+
+/* ── Annotation label style ── */
+.notebook-annotation {
+  color: var(--notebook-annotation);
+  font-style: italic;
+  font-size: 0.75rem;
+  letter-spacing: 0.02em;
+}
+
+/* ── Margin stamp ── */
+.margin-stamp {
+  position: absolute;
+  left: -1px;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  border-radius: 2px 0 0 2px;
+}
+
+/* ── SOC status pulse ── */
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: 0 0 4px var(--status-active); }
+  50% { box-shadow: 0 0 12px var(--status-active), 0 0 24px var(--status-active); }
+}
+
+.status-pulse {
+  animation: pulse-glow 2s ease-in-out infinite;
+}
+
+/* ── Threat severity glow ── */
+.threat-critical-glow {
+  box-shadow: 0 0 8px var(--threat-critical), 0 0 24px rgba(233, 69, 96, 0.2);
+}
+
+.threat-high-glow {
+  box-shadow: 0 0 8px var(--threat-high), 0 0 24px rgba(245, 166, 35, 0.2);
+}
+
+/* ── Sidebar notebook margin ── */
+.sidebar-margin {
+  position: relative;
+}
+
+.sidebar-margin::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: linear-gradient(
+    180deg,
+    transparent 0%,
+    var(--notebook-margin) 15%,
+    var(--notebook-margin) 85%,
+    transparent 100%
+  );
+  opacity: 0.3;
+}
+
+/* ── Table notebook style ── */
+.notebook-table {
+  background-image: repeating-linear-gradient(
+    transparent,
+    transparent calc(2.25rem - 1px),
+    var(--notebook-rule) calc(2.25rem - 1px),
+    var(--notebook-rule) 2.25rem
+  );
+}
+
+.notebook-table tr {
+  border-bottom: 1px solid var(--notebook-rule);
+}
+
+/* ── Metric card notebook style ── */
+.metric-card {
+  position: relative;
+  overflow: hidden;
+}
+
+.metric-card::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 3px;
+}
+
+/* ── Scrollbar styling ── */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--notebook-rule);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--muted-foreground);
+}
+
+/* ── Subtle animation for live data ── */
+@keyframes data-flow {
+  0% { opacity: 0.5; transform: translateX(-4px); }
+  50% { opacity: 1; transform: translateX(0); }
+  100% { opacity: 0.5; transform: translateX(4px); }
+}
+
+.data-animate {
+  animation: data-flow 1.5s ease-in-out infinite;
+}
+
+/* ── Notebook page curl effect ── */
+.page-curl {
+  position: relative;
+}
+
+.page-curl::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 20px;
+  height: 20px;
+  background: linear-gradient(
+    225deg,
+    var(--background) 50%,
+    var(--notebook-rule) 50%
+  );
+  border-radius: 0 0 0 4px;
+}
