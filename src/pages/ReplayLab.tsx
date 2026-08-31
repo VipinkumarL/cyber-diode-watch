@@ -58,6 +58,7 @@ export default function ReplayLab() {
   const fpsTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const flowsThisSecond = useRef(0);
   const alertCountRef = useRef(0);
+  const totalFlowsRef = useRef(0);
   const sourceIpsRef = useRef(new Set<string>());
   const destIpsRef = useRef(new Set<string>());
   const startTimeRef = useRef(0);
@@ -110,31 +111,34 @@ export default function ReplayLab() {
         }
       }
 
+      totalFlowsRef.current++;
+      const currentTotal = totalFlowsRef.current;
+
       setSessionStats((prev) => {
-        const newTotal = prev.totalFlows + 1;
         const newThreats = alert ? prev.threatsDetected + 1 : prev.threatsDetected;
         const newTotalLatency = prev.totalLatency + detectionTimeMs;
         return {
-          totalFlows: newTotal,
+          totalFlows: currentTotal,
           threatsDetected: newThreats,
-          avgLatency: Math.round(newTotalLatency / newTotal),
+          avgLatency: Math.round(newTotalLatency / currentTotal),
           totalLatency: newTotalLatency,
           measuredFps: 0,
         };
       });
 
       setReplayState({
-        totalFlows: sessionStats.totalFlows + 1,
-        processedFlows: sessionStats.totalFlows + 1,
+        totalFlows: currentTotal,
+        processedFlows: currentTotal,
       });
     },
-    [insertFlow, insertAlert, insertIncident, selectedScenario, setReplayState, sessionStats.totalFlows],
+    [insertFlow, insertAlert, insertIncident, selectedScenario, setReplayState],
   );
 
   const startReplay = useCallback(() => {
     resetFlowCounter();
     flowsThisSecond.current = 0;
     alertCountRef.current = 0;
+    totalFlowsRef.current = 0;
     sourceIpsRef.current = new Set();
     destIpsRef.current = new Set();
     startTimeRef.current = Date.now();
@@ -219,6 +223,7 @@ export default function ReplayLab() {
     resetReplay();
     setLastAlert(null);
     alertCountRef.current = 0;
+    totalFlowsRef.current = 0;
     sourceIpsRef.current = new Set();
     destIpsRef.current = new Set();
     setSessionStats({
