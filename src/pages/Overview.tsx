@@ -352,7 +352,7 @@ export default function Overview() {
                   cy="50%"
                   outerRadius={80}
                   dataKey="value"
-                  label={({ name, percent }) =>
+                  label={({ name, percent }: { name: string; percent: number }) =>
                     `${name} ${(percent * 100).toFixed(0)}%`
                   }
                 >

@@ -350,7 +350,7 @@ export default function Analytics() {
                   cy="50%"
                   outerRadius={90}
                   dataKey="value"
-                  label={({ name, percent }) =>
+                  label={({ name, percent }: { name: string; percent: number }) =>
                     `${name} ${(percent * 100).toFixed(0)}%`
                   }
                 >
