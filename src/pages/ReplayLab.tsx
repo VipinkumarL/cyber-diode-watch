@@ -1,6 +1,4 @@
 import { useState, useRef, useCallback, useEffect } from "react";
-import { useMutation } from "convex/react";
-import { api } from "@/convex/_generated/api";
 import {
   FlaskConical,
   Play,
@@ -24,6 +22,12 @@ import {
   resetFlowCounter,
   analyzeFlow,
 } from "@/lib/detection";
+import {
+  insertFlow,
+  insertAlert,
+  insertIncident,
+  clearAllData,
+} from "@/services/api";
 import type { Alert, NetworkFlow } from "@/lib/types";
 
 const SCENARIOS = [
@@ -37,12 +41,6 @@ const SCENARIOS = [
 
 export default function ReplayLab() {
   const { state: replayState, setState: setReplayState, reset: resetReplay } = useReplayActions();
-  const insertFlow = useMutation(api.flows.insertFlow);
-  const insertAlert = useMutation(api.alerts.insert);
-  const insertIncident = useMutation(api.incidents.insert);
-  const clearFlows = useMutation(api.flows.clear);
-  const clearAlerts = useMutation(api.alerts.clear);
-  const clearIncidents = useMutation(api.incidents.clear);
 
   const [selectedScenario, setSelectedScenario] = useState("normal");
   const [targetRate, setTargetRate] = useState(100);
@@ -72,11 +70,11 @@ export default function ReplayLab() {
   }, []);
 
   const processFlow = useCallback(
-    async (flow: NetworkFlow) => {
+    (flow: NetworkFlow) => {
       const { alert, updatedFlow, detectionTimeMs } = analyzeFlow(flow);
 
-      // Insert flow
-      await insertFlow(updatedFlow);
+      // Insert flow directly into service store
+      insertFlow(updatedFlow);
       flowsThisSecond.current++;
       sourceIpsRef.current.add(flow.sourceIp);
       destIpsRef.current.add(flow.destinationIp);
@@ -85,13 +83,11 @@ export default function ReplayLab() {
         setLastAlert(alert);
         alertCountRef.current++;
 
-        await insertAlert(alert);
+        insertAlert(alert);
 
         // Create incident on first threat or periodically
         if (alertCountRef.current === 1 || alertCountRef.current % 5 === 0) {
-          const incidentId = `INC-${Date.now()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
-          await insertIncident({
-            incidentId,
+          insertIncident({
             timestamp: alert.timestamp,
             title: `${alert.threatClass.replace("_", " ")} Attack Detected`,
             description: alert.description,
@@ -104,6 +100,7 @@ export default function ReplayLab() {
             evidence: alert.supportingEvidence,
             detector: alert.detector,
             detectionLatencyMs: alert.detectionLatencyMs,
+            status: "open",
             scenario: selectedScenario,
           });
 
@@ -131,7 +128,7 @@ export default function ReplayLab() {
         processedFlows: currentTotal,
       });
     },
-    [insertFlow, insertAlert, insertIncident, selectedScenario, setReplayState],
+    [selectedScenario, setReplayState, replayState.totalIncidents],
   );
 
   const startReplay = useCallback(() => {
@@ -216,7 +213,7 @@ export default function ReplayLab() {
     }, 1000);
   }, [selectedScenario, targetRate, processFlow, setReplayState]);
 
-  const resetAll = useCallback(async () => {
+  const resetAll = useCallback(() => {
     if (intervalRef.current) clearInterval(intervalRef.current);
     if (fpsTimerRef.current) clearInterval(fpsTimerRef.current);
     resetFlowCounter();
@@ -233,10 +230,8 @@ export default function ReplayLab() {
       totalLatency: 0,
       measuredFps: 0,
     });
-    await clearFlows();
-    await clearAlerts();
-    await clearIncidents();
-  }, [resetReplay, clearFlows, clearAlerts, clearIncidents]);
+    clearAllData();
+  }, [resetReplay]);
 
   const isRunning = replayState.status === "running";
   const isPaused = replayState.status === "paused";

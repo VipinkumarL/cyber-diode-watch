@@ -1,5 +1,3 @@
-import { useQuery } from "convex/react";
-import { api } from "@/convex/_generated/api";
 import {
   ShieldAlert,
   Wifi,
@@ -8,10 +6,9 @@ import {
   Lock,
   ScanSearch,
   ArrowUpFromLine,
-  Clock,
-  TrendingUp,
 } from "lucide-react";
 import { DETECTORS } from "@/lib/detection";
+import { useAlertData } from "@/services/api";
 
 const THREAT_ICONS: Record<string, typeof ShieldAlert> = {
   DDoS: Wifi,
@@ -39,8 +36,7 @@ const STATUS_STYLES: Record<string, { bg: string; text: string; label: string }>
 };
 
 export default function Threats() {
-  const alertStats = useQuery(api.alerts.stats);
-  const recentAlerts = useQuery(api.alerts.list, { limit: 20 });
+  const { alerts, stats: alertStats } = useAlertData(20, 1000);
 
   return (
     <div className="space-y-6">
@@ -164,11 +160,11 @@ export default function Threats() {
           </span>
         </div>
 
-        {recentAlerts && recentAlerts.length > 0 ? (
+        {alerts && alerts.length > 0 ? (
           <div className="space-y-2">
-            {recentAlerts.slice(0, 10).map((alert) => (
+            {alerts.slice(0, 10).map((alert) => (
               <div
-                key={alert._id}
+                key={alert.alertId}
                 className="flex items-center gap-4 px-4 py-3 rounded-lg bg-[#12122a]/30 border border-[#2a2a4a]/50 hover:border-[#533483]/30 transition-colors"
               >
                 <div

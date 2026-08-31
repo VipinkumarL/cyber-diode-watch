@@ -1,13 +1,9 @@
-import { useQuery } from "convex/react";
-import { api } from "@/convex/_generated/api";
 import { BarChart3 } from "lucide-react";
 import {
   AreaChart,
   Area,
   BarChart,
   Bar,
-  LineChart,
-  Line,
   PieChart,
   Pie,
   Cell,
@@ -18,20 +14,20 @@ import {
   ResponsiveContainer,
   Legend,
 } from "recharts";
+import {
+  useFlowData,
+  useAlertData,
+  useFlowTimeseries,
+  useAlertTimeline,
+} from "@/services/api";
 
 const COLORS = ["#e94560", "#f5a623", "#0f9b8e", "#533483", "#48b9a7", "#ff6b6b"];
 
 export default function Analytics() {
-  const flowStats = useQuery(api.flows.stats);
-  const alertStats = useQuery(api.alerts.stats);
-  const incidentStats = useQuery(api.incidents.stats);
-  const flowTimeseries = useQuery(api.flows.getFlowTimeseries, {
-    windowMs: 300000,
-  });
-  const alertTimeline = useQuery(api.alerts.recentTimeline, {
-    windowMs: 300000,
-  });
-  const flows = useQuery(api.flows.getRecent, { limit: 100 });
+  const { stats: flowStats, flows } = useFlowData(100, 1000);
+  const { stats: alertStats } = useAlertData(0, 1000);
+  const flowTimeseries = useFlowTimeseries(300000, 2000);
+  const alertTimeline = useAlertTimeline(300000, 2000);
 
   const isLoading = !flowStats;
 
@@ -103,7 +99,7 @@ export default function Analytics() {
   );
 
   // Flow timeseries
-  const chartData = (flowTimeseries ?? []).map((d) => ({
+  const chartData = flowTimeseries.map((d) => ({
     time: d.time,
     flows: d.total,
     threats: d.threats,
@@ -111,7 +107,7 @@ export default function Analytics() {
   }));
 
   // Alert timeseries
-  const alertChartData = (alertTimeline ?? []).map((d) => ({
+  const alertChartData = alertTimeline.map((d) => ({
     ...d,
     timeLabel: new Date(d.time).toLocaleTimeString("en-US", { hour12: false }),
   }));

@@ -1,14 +1,27 @@
-import { api } from "@/convex/_generated/api";
-import { useAuthActions } from "@convex-dev/auth/react";
-import { useConvexAuth, useQuery } from "convex/react";
+// Mock auth hook - no backend required
+import { useState, useCallback } from "react";
+
+interface MockUser {
+  name: string;
+  email: string;
+}
 
 export function useAuth() {
-  const { isLoading: isAuthLoading, isAuthenticated } = useConvexAuth();
-  const user = useQuery(api.users.currentUser);
-  const { signIn, signOut } = useAuthActions();
+  const [user, setUser] = useState<MockUser | null>({
+    name: "SOC Analyst",
+    email: "analyst@sih26145.local",
+  });
 
-  // Derive isLoading directly from the dependencies instead of managing separate state
-  const isLoading = isAuthLoading || user === undefined;
+  const isAuthenticated = !!user;
+  const isLoading = false;
+
+  const signIn = useCallback(async (_method: string, _form?: FormData) => {
+    setUser({ name: "SOC Analyst", email: "analyst@sih26145.local" });
+  }, []);
+
+  const signOut = useCallback(async () => {
+    setUser(null);
+  }, []);
 
   return {
     isLoading,

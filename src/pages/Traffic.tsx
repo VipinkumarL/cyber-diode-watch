@@ -1,19 +1,17 @@
 import { useState, useMemo } from "react";
-import { useQuery } from "convex/react";
-import { api } from "@/convex/_generated/api";
 import {
   Activity,
   Search,
   Pause,
   Play,
-  Download,
   Filter,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useReplayStore } from "@/lib/store";
+import { useFlowData } from "@/services/api";
 
 export default function Traffic() {
-  const flows = useQuery(api.flows.getRecent, { limit: 200 });
+  const { flows } = useFlowData(200, 1000);
   const [searchQuery, setSearchQuery] = useState("");
   const [filterSeverity, setFilterSeverity] = useState<string>("all");
   const [paused, setPaused] = useState(false);
@@ -161,7 +159,7 @@ export default function Traffic() {
               ) : (
                 displayFlows.map((flow) => (
                   <tr
-                    key={flow._id}
+                    key={flow.flowId}
                     className={cn(
                       "border-b border-[#2a2a4a]/30 transition-colors hover:bg-[#1a1a3e]/50",
                       flow.severity === "CRITICAL" && "bg-[#e94560]/5",

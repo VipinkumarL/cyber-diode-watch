@@ -1,6 +1,4 @@
 import { useState } from "react";
-import { useQuery } from "convex/react";
-import { api } from "@/convex/_generated/api";
 import {
   AlertTriangle,
   ChevronDown,
@@ -11,11 +9,11 @@ import {
   Activity,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useIncidentData, useAlertData } from "@/services/api";
 
 export default function Incidents() {
-  const incidents = useQuery(api.incidents.list, { limit: 50 });
-  const alertStats = useQuery(api.alerts.stats);
-  const incidentStats = useQuery(api.incidents.stats);
+  const { incidents, stats: incidentStats } = useIncidentData(50, 1000);
+  const { stats: alertStats } = useAlertData(0, 1000);
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   return (
@@ -76,10 +74,10 @@ export default function Incidents() {
       <div className="space-y-3">
         {incidents && incidents.length > 0 ? (
           incidents.map((incident) => {
-            const isExpanded = expandedId === incident._id;
+            const isExpanded = expandedId === incident.incidentId;
             return (
               <div
-                key={incident._id}
+                key={incident.incidentId}
                 className={cn(
                   "rounded-xl bg-[#16213e]/80 border overflow-hidden transition-colors",
                   isExpanded
@@ -90,7 +88,7 @@ export default function Incidents() {
                 {/* Incident header */}
                 <button
                   onClick={() =>
-                    setExpandedId(isExpanded ? null : incident._id)
+                    setExpandedId(isExpanded ? null : incident.incidentId)
                   }
                   className="w-full flex items-center gap-4 p-4 text-left"
                 >

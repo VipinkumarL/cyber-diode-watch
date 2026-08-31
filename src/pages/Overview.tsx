@@ -1,5 +1,3 @@
-import { useQuery } from "convex/react";
-import { api } from "@/convex/_generated/api";
 import {
   Activity,
   ShieldAlert,
@@ -25,6 +23,11 @@ import {
   ResponsiveContainer,
   Legend,
 } from "recharts";
+import {
+  useFlowData,
+  useAlertData,
+  useFlowTimeseries,
+} from "@/services/api";
 
 const SEVERITY_DATA = [
   { name: "Critical", value: 0, color: "#e94560" },
@@ -35,15 +38,9 @@ const SEVERITY_DATA = [
 ];
 
 export default function Overview() {
-  const stats = useQuery(api.flows.stats);
-  const alertStats = useQuery(api.alerts.stats);
-  const recentAlerts = useQuery(api.alerts.list, { limit: 10 });
-  const flowTimeseries = useQuery(api.flows.getFlowTimeseries, {
-    windowMs: 300000,
-  });
-  const metricsTimeseries = useQuery(api.metrics.getTimeseries, {
-    windowMs: 300000,
-  });
+  const { stats } = useFlowData(200, 1000);
+  const { alerts, stats: alertStats } = useAlertData(10, 1000);
+  const flowTimeseries = useFlowTimeseries(300000, 2000);
 
   const isLoading = !stats;
 
@@ -132,7 +129,7 @@ export default function Overview() {
   ];
 
   // Chart data from timeseries
-  const chartData = (flowTimeseries ?? []).map((d) => ({
+  const chartData = flowTimeseries.map((d) => ({
     time: d.time,
     flows: d.total,
     threats: d.threats,
@@ -405,7 +402,7 @@ export default function Overview() {
             {alertStats?.total ?? 0} total
           </span>
         </div>
-        {recentAlerts && recentAlerts.length > 0 ? (
+        {alerts && alerts.length > 0 ? (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
@@ -431,9 +428,9 @@ export default function Overview() {
                 </tr>
               </thead>
               <tbody>
-                {recentAlerts.map((alert) => (
+                {alerts.map((alert) => (
                   <tr
-                    key={alert._id}
+                    key={alert.alertId}
                     className="border-b border-[#2a2a4a]/50 hover:bg-[#1a1a3e]/50"
                   >
                     <td className="py-2.5 px-3 text-xs text-[#c4c1bb] font-mono">

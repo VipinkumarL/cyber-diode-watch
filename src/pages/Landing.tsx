@@ -178,14 +178,14 @@ export default function Landing() {
             className="flex flex-wrap items-center justify-center gap-4"
           >
             <button
-              onClick={() => navigate("/auth?returnTo=/dashboard/replay")}
+              onClick={() => navigate("/dashboard/replay")}
               className="flex items-center gap-2 px-8 py-3.5 rounded-xl bg-[#e94560] text-[#1a1a2e] font-bold text-sm hover:bg-[#e94560]/85 transition-colors shadow-lg shadow-[#e94560]/20"
             >
               Launch SOC Dashboard
               <ArrowRight className="w-4 h-4" />
             </button>
             <button
-              onClick={() => navigate("/auth?returnTo=/dashboard/overview")}
+              onClick={() => navigate("/dashboard/overview")}
               className="flex items-center gap-2 px-8 py-3.5 rounded-xl bg-[#533483]/20 text-[#e8e6e3] font-semibold text-sm border border-[#533483]/30 hover:bg-[#533483]/30 transition-colors"
             >
               View Overview

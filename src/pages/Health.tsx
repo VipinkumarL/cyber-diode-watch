@@ -1,5 +1,3 @@
-import { useQuery } from "convex/react";
-import { api } from "@/convex/_generated/api";
 import {
   HeartPulse,
   Server,
@@ -9,15 +7,15 @@ import {
   Activity,
   Clock,
   HardDrive,
-  Cpu,
   Layers,
 } from "lucide-react";
+import { useFlowData, useAlertData, useMetrics } from "@/services/api";
+import { useReplayStore } from "@/lib/store";
 
 export default function Health() {
-  const flowStats = useQuery(api.flows.stats);
-  const alertStats = useQuery(api.alerts.stats);
-  const replayState = useQuery(api.replay.getState);
-  const metricsLatest = useQuery(api.metrics.getLatest);
+  const { stats: flowStats } = useFlowData(0, 2000);
+  const { stats: alertStats } = useAlertData(0, 2000);
+  const replayState = useReplayStore();
 
   const isLoading = !flowStats;
 
@@ -26,7 +24,7 @@ export default function Health() {
       name: "Backend API",
       status: "online",
       icon: Server,
-      detail: "FastAPI + Uvicorn (Convex adapted)",
+      detail: "FastAPI + Uvicorn (Future integration)",
       color: "#0f9b8e",
     },
     {
@@ -40,7 +38,7 @@ export default function Health() {
       name: "Database",
       status: "online",
       icon: Database,
-      detail: "Convex (PostgreSQL-compatible schema)",
+      detail: "In-Memory Store (PostgreSQL-ready schema)",
       color: "#0f9b8e",
     },
     {
@@ -79,13 +77,13 @@ export default function Health() {
     },
     {
       label: "Active Replay",
-      value: replayState?.status === "running" ? "Running" : "Idle",
+      value: replayState.status === "running" ? "Running" : "Idle",
       icon: HeartPulse,
-      color: replayState?.status === "running" ? "#0f9b8e" : "#8b8994",
+      color: replayState.status === "running" ? "#0f9b8e" : "#8b8994",
     },
     {
       label: "Dataset",
-      value: replayState?.dataset ?? "None",
+      value: replayState.dataset ?? "None",
       icon: HardDrive,
       color: "#48b9a7",
     },
