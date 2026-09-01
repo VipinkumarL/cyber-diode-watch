@@ -22,9 +22,19 @@ def test_list_detectors(client):
     assert threat_classes == expected
 
 
-def test_detectors_not_implemented(client):
-    """All detectors should be marked NOT_IMPLEMENTED (no ML model loaded)."""
+def test_ddos_detector_is_active(client):
+    """The DDoS detector should be ACTIVE (working baseline)."""
+    resp = client.get("/api/detectors")
+    data = resp.json()
+    ddos = next(d for d in data if d["threatClass"] == "DDoS")
+    assert ddos["status"] == "ACTIVE"
+    assert "Baseline" in ddos["method"] or "Statistical" in ddos["method"]
+
+
+def test_other_detectors_not_implemented(client):
+    """All non-DDoS detectors should remain NOT_IMPLEMENTED."""
     resp = client.get("/api/detectors")
     data = resp.json()
     for d in data:
-        assert d["status"] == "NOT_IMPLEMENTED"
+        if d["threatClass"] != "DDoS":
+            assert d["status"] == "NOT_IMPLEMENTED"
