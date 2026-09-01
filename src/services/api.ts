@@ -33,10 +33,10 @@ import type {
 
 /**
  * FastAPI backend base URL. Set via VITE_API_BASE_URL env var.
- * When empty, the app runs in mock mode with in-memory data.
+ * Defaults to the local FastAPI backend. Set to "" to run in mock-only mode.
  * Example: VITE_API_BASE_URL=http://127.0.0.1:8000
  */
-const API_BASE_URL: string = import.meta.env.VITE_API_BASE_URL ?? "";
+const API_BASE_URL: string = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8000";
 
 /**
  * WebSocket URL. Auto-derived from API_BASE_URL if not explicitly set.
