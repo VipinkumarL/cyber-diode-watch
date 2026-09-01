@@ -145,6 +145,7 @@ class DetectionPipeline:
         "c2": ThreatClass.C2_Beaconing,
         "dns": ThreatClass.DGA_DNS_Tunneling,
         "encrypted_malware": ThreatClass.Encrypted_Malware,
+        "enc_malware": ThreatClass.Encrypted_Malware,
         "recon": ThreatClass.Reconnaissance,
         "reconnaissance": ThreatClass.Reconnaissance,
         "exfiltration": ThreatClass.Data_Exfiltration,

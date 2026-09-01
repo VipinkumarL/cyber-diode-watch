@@ -40,6 +40,7 @@ const SCENARIOS = [
   { id: "ddos", label: "DDoS", icon: Wifi, color: "#e94560" },
   { id: "c2", label: "C2 Beacon", icon: Radio, color: "#f5a623" },
   { id: "dns", label: "DNS Tunnel", icon: Globe, color: "#0f9b8e" },
+  { id: "encrypted_malware", label: "Encrypted Malware", icon: Lock, color: "#9b59b6" },
   { id: "recon", label: "Recon", icon: ScanSearch, color: "#48b9a7" },
   { id: "exfil", label: "Exfil", icon: ArrowUpFromLine, color: "#ff6b6b" },
 ];

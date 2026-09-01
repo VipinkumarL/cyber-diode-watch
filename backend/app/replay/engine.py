@@ -181,6 +181,37 @@ def generate_recon_flow() -> NetworkFlow:
     )
 
 
+def generate_encrypted_malware_flow() -> NetworkFlow:
+    """Generate a synthetic encrypted malware flow."""
+    global _flow_counter
+    _flow_counter += 1
+    now_ms = int(time.time() * 1000)
+    bps = random.uniform(100000, 500000)
+    return NetworkFlow(
+        flowId=f"FLOW-{_flow_counter:07d}",
+        timestamp=now_ms,
+        sourceIp=_random_ip(),
+        destinationIp=_random_ip(),
+        protocol="TCP",
+        sourcePort=random.randint(49000, 50000),
+        destinationPort=random.choice([443, 8443]),
+        flowDuration=round(random.uniform(20, 120), 3),
+        totalPackets=random.randint(500, 5000),
+        packetsPerSecond=round(random.uniform(100, 400), 2),
+        bytesPerSecond=round(bps, 2),
+        totalBytes=int(bps * 40),
+        classification=ThreatClass.Normal,
+        confidence=0.0,
+        severity=Severity.INFO,
+        sourceEntropy=round(random.uniform(4, 7), 2),
+        destinationConcentration=round(random.uniform(0.6, 1.0), 2),
+        packetLengthMean=round(random.uniform(800, 1300), 1),
+        packetLengthStd=round(random.uniform(100, 250), 1),
+        isSuspicious=False,
+        scenario="encrypted_malware",
+    )
+
+
 def generate_exfil_flow() -> NetworkFlow:
     """Generate a synthetic data exfiltration flow."""
     global _flow_counter
@@ -219,6 +250,7 @@ _GENERATORS: dict[str, Callable[[], NetworkFlow]] = {
     "ddos": generate_ddos_flow,
     "c2": generate_c2_flow,
     "dns": generate_dns_flow,
+    "encrypted_malware": generate_encrypted_malware_flow,
     "recon": generate_recon_flow,
     "exfil": generate_exfil_flow,
 }
