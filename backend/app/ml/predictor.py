@@ -154,52 +154,54 @@ def _extract_model_features(
     """
     Extract features from a NetworkFlow matching the model's feature order.
 
-    For CICIDS2017 models (12 features), the feature names differ from
-    the original 11-feature synthetic model. This function maps between them.
+    Supports both:
+      - Synthetic model features (camelCase): flowDuration, totalPackets, etc.
+      - CICIDS2017 model features (snake_case): flow_duration, total_fwd_packets, etc.
 
-    CICIDS2017 feature mapping:
-      flowDuration            → flow.flowDuration
-      totalFwdPackets         → estimated from flow.totalPackets
-      totalBwdPackets         → estimated (0 for single-direction)
-      totalBytes              → flow.totalBytes
-      bytesPerSecond          → flow.bytesPerSecond
-      packetsPerSecond        → flow.packetsPerSecond
-      destinationPort         → flow.destinationPort
-      sourcePort              → flow.sourcePort
-      packetLengthMean        → flow.packetLengthMean
-      packetLengthStd         → flow.packetLengthStd
-      fwdPacketLengthMean     → flow.packetLengthMean (best approximation)
-      bwdPacketLengthMean     → 0.0 (not available in unidirectional data)
-
-    For synthetic models (11 features), use the original mapping.
+    The model stores its feature_names in model_info. We map both naming
+    conventions to the correct NetworkFlow fields.
     """
-    # Build a lookup from field name to value
+    # Unified lookup supporting both naming conventions
+    # CICIDS2017 snake_case names AND synthetic camelCase names
+    pml = flow.packetLengthMean if flow.packetLengthMean is not None else 0.0
+    pstd = flow.packetLengthStd if flow.packetLengthStd is not None else 0.0
+    se = flow.sourceEntropy if flow.sourceEntropy is not None else 0.0
+    dc = (
+        flow.destinationConcentration
+        if flow.destinationConcentration is not None
+        else 0.0
+    )
+
     feature_map = {
+        # CamelCase (synthetic model)
         "flowDuration": float(flow.flowDuration),
         "totalPackets": float(flow.totalPackets),
-        "totalFwdPackets": float(flow.totalPackets),  # Best approximation
-        "totalBwdPackets": 0.0,  # Not available in unidirectional data
+        "totalFwdPackets": float(flow.totalPackets),
+        "totalBwdPackets": 0.0,
         "packetsPerSecond": float(flow.packetsPerSecond),
         "bytesPerSecond": float(flow.bytesPerSecond),
         "totalBytes": float(flow.totalBytes),
         "sourcePort": float(flow.sourcePort),
         "destinationPort": float(flow.destinationPort),
-        "sourceEntropy": flow.sourceEntropy if flow.sourceEntropy is not None else 0.0,
-        "destinationConcentration": (
-            flow.destinationConcentration
-            if flow.destinationConcentration is not None
-            else 0.0
-        ),
-        "packetLengthMean": (
-            flow.packetLengthMean if flow.packetLengthMean is not None else 0.0
-        ),
-        "packetLengthStd": (
-            flow.packetLengthStd if flow.packetLengthStd is not None else 0.0
-        ),
-        "fwdPacketLengthMean": (
-            flow.packetLengthMean if flow.packetLengthMean is not None else 0.0
-        ),
-        "bwdPacketLengthMean": 0.0,  # Not available in unidirectional data
+        "sourceEntropy": se,
+        "destinationConcentration": dc,
+        "packetLengthMean": pml,
+        "packetLengthStd": pstd,
+        "fwdPacketLengthMean": pml,
+        "bwdPacketLengthMean": 0.0,
+        # Snake_case (CICIDS2017 model)
+        "flow_duration": float(flow.flowDuration),
+        "total_fwd_packets": float(flow.totalPackets),
+        "total_backward_packets": 0.0,
+        "total_bytes": float(flow.totalBytes),
+        "flow_bytes_s": float(flow.bytesPerSecond),
+        "flow_packets_s": float(flow.packetsPerSecond),
+        "destination_port": float(flow.destinationPort),
+        "source_port": float(flow.sourcePort),
+        "packet_length_mean": pml,
+        "packet_length_std": pstd,
+        "fwd_packet_length_mean": pml,
+        "bwd_packet_length_mean": 0.0,
     }
 
     features = []

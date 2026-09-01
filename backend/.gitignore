@@ -1,0 +1,14 @@
+# CICIDS2017 raw dataset CSVs (~776 MB) — download via training/prepare_cicids2017.py
+backend/data/*.csv
+backend/data/*.html
+
+# Cleaned training data
+backend/training/data/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Pytest cache
+.pytest_cache/

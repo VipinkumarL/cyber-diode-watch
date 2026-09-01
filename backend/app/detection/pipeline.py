@@ -159,9 +159,10 @@ class DetectionPipeline:
         From a list of alerts, return the most relevant one.
 
         Priority:
-          1. ML prediction (highest priority when available)
-          2. Scenario tag matching detector's threat class
-          3. Highest confidence
+          1. Scenario tag matching detector's threat class (highest)
+          2. Non-Normal ML predictions (when ML detects an attack)
+          3. Baseline detector alerts (sorted by confidence)
+          4. ML "Normal" predictions (lowest priority)
         """
         if not alerts:
             return None
@@ -174,22 +175,41 @@ class DetectionPipeline:
             Severity.INFO: 4,
         }
 
-        # Prefer ML alerts (they have the highest predictive power)
-        ml_alerts = [a for a in alerts if a.detector.startswith("ML ")]
-        if ml_alerts:
-            return max(
-                ml_alerts,
-                key=lambda a: (-a.confidence, severity_order.get(a.severity, 5)),
-            )
-
-        # Check if any alert's scenario matches its own threat class
+        # 1. Scenario-matched detector alerts are the most relevant
         for alert in alerts:
             if alert.scenario and alert.scenario in self._SCENARIO_PRIORITY:
                 preferred = self._SCENARIO_PRIORITY[alert.scenario]
-                if alert.threatClass == preferred:
+                if alert.threatClass == preferred and not alert.detector.startswith("ML "):
                     return alert
 
-        # Fallback: highest confidence, then severity
+        # 2. Non-Normal ML predictions (ML detected an attack)
+        ml_attack_alerts = [
+            a for a in alerts
+            if a.detector.startswith("ML ") and a.threatClass != ThreatClass.Normal
+        ]
+        if ml_attack_alerts:
+            return max(
+                ml_attack_alerts,
+                key=lambda a: (-a.confidence, severity_order.get(a.severity, 5)),
+            )
+
+        # 3. Baseline detector alerts (non-ML, non-Normal)
+        detector_alerts = [
+            a for a in alerts
+            if not a.detector.startswith("ML ") and a.threatClass != ThreatClass.Normal
+        ]
+        if detector_alerts:
+            return max(
+                detector_alerts,
+                key=lambda a: (-a.confidence, severity_order.get(a.severity, 5)),
+            )
+
+        # 4. ML "Normal" predictions (fallback)
+        ml_normal = [a for a in alerts if a.detector.startswith("ML ")]
+        if ml_normal:
+            return ml_normal[0]
+
+        # 5. Any remaining alert
         return max(
             alerts,
             key=lambda a: (-a.confidence, severity_order.get(a.severity, 5)),

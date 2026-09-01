@@ -2,3 +2,17 @@
 node_modules
 dist
 src/convex/_generated
+
+# CICIDS2017 raw dataset CSVs (~776 MB) — re-download via training/prepare_cicids2017.py
+backend/data/*.csv
+backend/data/*.html
+backend/training/data/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# Pytest cache
+backend/.pytest_cache/

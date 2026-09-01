@@ -4,17 +4,13 @@ SIH26145 — CICIDS2017 Random Forest Training Script.
 
 Trains a binary BENIGN/ATTACK classifier using real CICIDS2017 flow data.
 
-This script:
-  1. Loads the cleaned CICIDS2017 dataset (from prepare_cicids2017.py)
-  2. Splits data temporally (by day) to avoid data leakage
-  3. Trains a Random Forest classifier
-  4. Reports accuracy, precision, recall, F1, confusion matrix, ROC-AUC
-  5. Saves model artifacts with explicit model_source="CICIDS2017"
+Uses stratified sampling from the full 2M+ row dataset to manage memory
+while preserving class distribution.
 
 PREREQUISITES:
-  Run prepare_cicids2017.py first to create the cleaned dataset:
+  Run prepare_cicids2017.py first:
     cd backend
-    python training/prepare_cicids2017.py /path/to/MachineLearningCSV/
+    python -m training.prepare_cicids2017 /path/to/csvs/
 
 OUTPUT:
     backend/ml_models/rf_cicids2017.joblib
@@ -47,6 +43,7 @@ from sklearn.metrics import (
     recall_score,
     roc_auc_score,
 )
+from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder, StandardScaler
 
 # Add backend/ to path
@@ -55,13 +52,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from training.prepare_cicids2017 import ML_FEATURE_COLUMNS
 
 # ── Configuration ─────────────────────────────────────────────────
-DATA_DIR = Path(__file__).resolve().parent / "data"
-CLEANED_CSV = DATA_DIR / "cicids2017_cleaned.csv"
+CLEANED_CSV = Path(__file__).resolve().parent / "data" / "cicids2017_cleaned.csv"
 MODEL_DIR = Path(__file__).resolve().parent.parent / "ml_models"
 
 RANDOM_SEED = 42
+MAX_TRAINING_ROWS = 500_000  # Stratified sample limit for memory efficiency
 
-# Random Forest hyperparameters (tuned for network flow data)
+# Random Forest hyperparameters
 RF_PARAMS = {
     "n_estimators": 200,
     "max_depth": 25,
@@ -80,7 +77,7 @@ def load_cleaned_data() -> pd.DataFrame:
         print(f"ERROR: Cleaned dataset not found at {CLEANED_CSV}")
         print("Run prepare_cicids2017.py first:")
         print("  cd backend")
-        print("  python training/prepare_cicids2017.py /path/to/MachineLearningCSV/")
+        print("  python -m training.prepare_cicids2017 /path/to/csvs/")
         sys.exit(1)
 
     print(f"Loading cleaned dataset from {CLEANED_CSV}...")
@@ -90,68 +87,60 @@ def load_cleaned_data() -> pd.DataFrame:
     return df
 
 
-def train_test_split_by_ratio(
-    df: pd.DataFrame,
-    test_size: float = 0.2,
-    seed: int = RANDOM_SEED,
-) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """
-    Split data with stratification (preserving class ratios).
-
-    CICIDS2017 has days of the week. For maximum realism, we would
-    split by day, but since the CSV may be combined, we use stratified
-    random split as a practical alternative. We shuffle to ensure
-    random distribution while maintaining class balance.
-    """
-    print(f"Splitting data (test_size={test_size}, stratified)...")
-
-    from sklearn.model_selection import train_test_split
-
-    train_df, test_df = train_test_split(
-        df, test_size=test_size, random_state=seed, stratify=df["label"]
-    )
-
-    print(f"  Train: {len(train_df)} samples")
-    for label in train_df["label"].unique():
-        count = len(train_df[train_df["label"] == label])
-        print(f"    {label}: {count} ({count/len(train_df)*100:.1f}%)")
-
-    print(f"  Test:  {len(test_df)} samples")
-    for label in test_df["label"].unique():
-        count = len(test_df[test_df["label"] == label])
-        print(f"    {label}: {count} ({count/len(test_df)*100:.1f}%)")
-
-    return train_df, test_df
-
-
 def train_model() -> dict:
-    """
-    Train the CICIDS2017 Random Forest model and save all artifacts.
-
-    Returns:
-        dict with training metrics.
-    """
+    """Train the CICIDS2017 Random Forest model and save all artifacts."""
     print("=" * 60)
     print("SIH26145 — CICIDS2017 Random Forest Training")
     print("=" * 60)
 
     # ── Step 1: Load data ─────────────────────────────────────────
     print("\n[1/8] Loading cleaned CICIDS2017 data...")
-    df = load_cleaned_data()
+    full_df = load_cleaned_data()
+    total_rows = len(full_df)
 
     # Verify features
-    available = [c for c in ML_FEATURE_COLUMNS if c in df.columns]
+    available = [c for c in ML_FEATURE_COLUMNS if c in full_df.columns]
     if len(available) < len(ML_FEATURE_COLUMNS):
-        missing = [c for c in ML_FEATURE_COLUMNS if c not in df.columns]
+        missing = [c for c in ML_FEATURE_COLUMNS if c not in full_df.columns]
         print(f"  WARNING: Missing features: {missing}")
-        print(f"  Available: {available}")
-        # Proceed with available features
 
     feature_cols = available
     print(f"  Using {len(feature_cols)} features: {feature_cols}")
 
-    # ── Step 2: Prepare X, y ──────────────────────────────────────
-    print("\n[2/8] Preparing features and labels...")
+    # ── Step 2: Stratified sample for memory efficiency ───────────
+    print(f"\n[2/8] Stratified sampling (max {MAX_TRAINING_ROWS} rows)...")
+    if total_rows > MAX_TRAINING_ROWS:
+        df = full_df.groupby("label", group_keys=False).apply(
+            lambda x: x.sample(
+                n=min(len(x), int(MAX_TRAINING_ROWS * len(x) / total_rows)),
+                random_state=RANDOM_SEED,
+            ),
+            include_groups=False,
+        )
+        # Re-add label column since include_groups=False drops it
+        # Actually, let's use a simpler approach
+        del full_df  # free memory
+        del df
+
+        # Reload and sample properly
+        full_df = load_cleaned_data()
+        sampled_dfs = []
+        for label in full_df["label"].unique():
+            subset = full_df[full_df["label"] == label]
+            n_sample = min(len(subset), int(MAX_TRAINING_ROWS * len(subset) / total_rows))
+            sampled_dfs.append(subset.sample(n=n_sample, random_state=RANDOM_SEED))
+        df = pd.concat(sampled_dfs, ignore_index=True)
+        del full_df
+    else:
+        df = full_df
+
+    print(f"  Training set size: {len(df)} rows")
+    for label in df["label"].unique():
+        count = (df["label"] == label).sum()
+        print(f"    {label}: {count} ({count/len(df)*100:.1f}%)")
+
+    # ── Step 3: Prepare X, y ──────────────────────────────────────
+    print("\n[3/8] Preparing features and labels...")
     X = df[feature_cols].values.astype(np.float64)
     y_raw = df["label"].values
 
@@ -164,15 +153,9 @@ def train_model() -> dict:
     class_names = list(label_encoder.classes_)
 
     print(f"  Classes: {class_names}")
-    print(f"  Label distribution:")
-    for cls in class_names:
-        count = np.sum(y == class_names.index(cls))
-        print(f"    {cls}: {count} ({count/len(y)*100:.1f}%)")
 
-    # ── Step 3: Split data ────────────────────────────────────────
-    print("\n[3/8] Splitting data...")
-    from sklearn.model_selection import train_test_split
-
+    # ── Step 4: Split data ────────────────────────────────────────
+    print("\n[4/8] Splitting data (80/20, stratified)...")
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=0.2, random_state=RANDOM_SEED, stratify=y
     )
@@ -186,27 +169,23 @@ def train_model() -> dict:
     overlap = train_set & test_set
     print(f"  Duplicate rows in train/test: {len(overlap)}")
 
-    # ── Step 4: Scale features ────────────────────────────────────
-    print("\n[4/8] Scaling features (StandardScaler)...")
+    # ── Step 5: Scale features ────────────────────────────────────
+    print("\n[5/8] Scaling features (StandardScaler)...")
     scaler = StandardScaler()
     X_train_scaled = scaler.fit_transform(X_train)
     X_test_scaled = scaler.transform(X_test)
-    print(f"  Feature means (first 3): {scaler.mean_[:3].round(3)}")
-    print(f"  Feature stds  (first 3): {scaler.scale_[:3].round(3)}")
 
-    # ── Step 5: Train Random Forest ───────────────────────────────
-    print("\n[5/8] Training Random Forest...")
+    # ── Step 6: Train Random Forest ───────────────────────────────
+    print("\n[6/8] Training Random Forest...")
     print(f"  Parameters: {RF_PARAMS}")
     start_time = time.time()
     clf = RandomForestClassifier(**RF_PARAMS)
     clf.fit(X_train_scaled, y_train)
     train_time = time.time() - start_time
     print(f"  Training time: {train_time:.2f}s")
-    print(f"  Trees: {clf.n_estimators}")
-    print(f"  Max depth: {clf.max_depth}")
 
-    # ── Step 6: Evaluate ──────────────────────────────────────────
-    print("\n[6/8] Evaluating on test set...")
+    # ── Step 7: Evaluate ──────────────────────────────────────────
+    print("\n[7/8] Evaluating on test set...")
     y_pred = clf.predict(X_test_scaled)
     y_proba = clf.predict_proba(X_test_scaled)
 
@@ -221,7 +200,6 @@ def train_model() -> dict:
     print(f"  Recall:    {recall:.4f}")
     print(f"  F1 Score:  {f1:.4f}")
 
-    # ROC-AUC
     try:
         if len(class_names) == 2:
             roc_auc = roc_auc_score(y_test, y_proba[:, 1])
@@ -243,37 +221,31 @@ def train_model() -> dict:
         row_str = "".join(f"{val:>14}" for val in row)
         print(f"  {class_names[i][:12]:>12} {row_str}")
 
-    # Feature importance
     print(f"\n  ── Feature Importance ──")
     importances = clf.feature_importances_
     for feat, imp in sorted(zip(feature_cols, importances), key=lambda x: -x[1]):
         bar = "█" * int(imp * 50)
         print(f"  {feat:<30} {imp:.4f} {bar}")
 
-    # ── Step 7: Save model artifacts ──────────────────────────────
-    print("\n[7/8] Saving model artifacts...")
+    # ── Step 8: Save model artifacts ──────────────────────────────
+    print("\n[8/8] Saving model artifacts...")
     MODEL_DIR.mkdir(parents=True, exist_ok=True)
 
-    model_version = "2.0-cicids2017"
-    model_name = "RandomForest-CICIDS2017"
+    model_version = "2.0-cicids2017-real"
+    model_name = "RandomForest-CICIDS2017-Real"
 
-    # Save classifier
     clf_path = MODEL_DIR / "rf_cicids2017.joblib"
     joblib.dump(clf, clf_path)
-    print(f"  Saved: {clf_path} ({os.path.getsize(clf_path)} bytes)")
+    print(f"  Saved: {clf_path} ({os.path.getsize(clf_path):,} bytes)")
 
-    # Save scaler
     scaler_path = MODEL_DIR / "scaler_cicids2017.joblib"
     joblib.dump(scaler, scaler_path)
     print(f"  Saved: {scaler_path}")
 
-    # Save label encoder
     encoder_path = MODEL_DIR / "label_encoder_cicids2017.joblib"
     joblib.dump(label_encoder, encoder_path)
     print(f"  Saved: {encoder_path}")
 
-    # Save model info
-    cm_list = cm.tolist()
     model_info = {
         "model_name": model_name,
         "model_version": model_version,
@@ -283,85 +255,66 @@ def train_model() -> dict:
         "num_features": len(feature_cols),
         "classes": class_names,
         "num_classes": len(class_names),
-        "training_samples": len(X_train),
-        "test_samples": len(X_test),
-        "duplicate_overlap": len(overlap),
+        "training_samples": int(len(X_train)),
+        "test_samples": int(len(X_test)),
+        "duplicate_overlap": int(len(overlap)),
         "random_seed": RANDOM_SEED,
         "rf_params": RF_PARAMS,
         "metrics": {
-            "accuracy": round(accuracy, 4),
-            "precision_weighted": round(precision, 4),
-            "recall_weighted": round(recall, 4),
-            "f1_weighted": round(f1, 4),
-            "roc_auc": round(roc_auc, 4),
+            "accuracy": round(float(accuracy), 4),
+            "precision_weighted": round(float(precision), 4),
+            "recall_weighted": round(float(recall), 4),
+            "f1_weighted": round(float(f1), 4),
+            "roc_auc": round(float(roc_auc), 4),
         },
-        "confusion_matrix": cm_list,
+        "confusion_matrix": cm.tolist(),
         "classification_report": classification_report(
             y_test, y_pred, target_names=class_names, output_dict=True
         ),
         "training_time_seconds": round(train_time, 2),
         "training_date": time.strftime("%Y-%m-%d %H:%M:%S"),
         "data_source": "CICIDS2017 (real labeled network flow data)",
+        "data_source_detail": "HuggingFace bvk/CICIDS-2017, 5 days of captured traffic",
         "data_transparency": (
             "This model is trained on the CICIDS2017 dataset "
             "(https://www.unb.ca/cic/datasets/ids-2017.html) containing "
-            "real labeled network flows. Binary classification: "
+            "real labeled network flows from CICFlowMeter. Binary classification: "
             "BENIGN vs ATTACK. NOT synthetic data."
         ),
-        "feature_mapping": {
-            "flow_duration": "Flow Duration (ms)",
-            "total_fwd_packets": "Total Fwd Packets",
-            "total_backward_packets": "Total Backward Packets",
-            "total_bytes": "Fwd + Bwd Packet Length Total",
-            "flow_bytes_s": "Flow Bytes/s",
-            "flow_packets_s": "Flow Packets/s",
-            "destination_port": "Destination Port",
-            "source_port": "Source Port",
-            "packet_length_mean": "Packet Length Mean",
-            "packet_length_std": "Packet Length Std",
-            "fwd_packet_length_mean": "Fwd Packet Length Mean",
-            "bwd_packet_length_mean": "Bwd Packet Length Mean",
-        },
-        "label_mapping": "Binary: BENIGN=0, ATTACK=1",
+        "total_dataset_rows": total_rows,
+        "attack_types_included": [
+            "DDoS", "DoS Hulk", "DoS GoldenEye", "DoS Slowloris",
+            "DoS Slowhttptest", "Heartbleed", "FTP-Patator", "SSH-Patator",
+            "Web Attack Brute Force", "Web Attack XSS", "Web Attack SQL Injection",
+            "Infiltration", "Portscan", "Botnet",
+        ],
     }
     info_path = MODEL_DIR / "model_info_cicids2017.joblib"
     joblib.dump(model_info, info_path)
     print(f"  Saved: {info_path}")
 
-    # ── Summary ───────────────────────────────────────────────────
-    print("\n[8/8] Training complete!")
     print("\n" + "=" * 60)
     print("CICIDS2017 TRAINING COMPLETE")
     print("=" * 60)
     print(f"  Model: {model_name} v{model_version}")
     print(f"  Data source: CICIDS2017 (real labeled network flow data)")
+    print(f"  Total dataset: {total_rows} rows")
+    print(f"  Training: {len(X_train)}, Test: {len(X_test)}")
     print(f"  Accuracy:  {accuracy*100:.2f}%")
     print(f"  F1 Score:  {f1:.4f}")
     print(f"  ROC-AUC:   {roc_auc:.4f}")
     print(f"  Training time: {train_time:.2f}s")
-    print(f"  Training samples: {len(X_train)}")
-    print(f"  Test samples: {len(X_test)}")
-    print(f"  Features: {len(feature_cols)}")
-    print(f"  Artifact sizes:")
-    for name in ["rf_cicids2017.joblib", "scaler_cicids2017.joblib",
-                 "label_encoder_cicids2017.joblib", "model_info_cicids2017.joblib"]:
-        fpath = MODEL_DIR / name
-        if fpath.exists():
-            print(f"    {name}: {os.path.getsize(fpath):,} bytes")
-    print(f"\n  Model files saved to: {MODEL_DIR}")
-    print(f"\n  This is a REAL model trained on the CICIDS2017 dataset.")
-    print(f"  The backend will load it automatically when present.")
 
     return {
-        "accuracy": accuracy,
-        "precision": precision,
-        "recall": recall,
-        "f1": f1,
-        "roc_auc": roc_auc,
+        "accuracy": float(accuracy),
+        "precision": float(precision),
+        "recall": float(recall),
+        "f1": float(f1),
+        "roc_auc": float(roc_auc),
         "train_time": train_time,
         "model_dir": str(MODEL_DIR),
-        "training_samples": len(X_train),
-        "test_samples": len(X_test),
+        "training_samples": int(len(X_train)),
+        "test_samples": int(len(X_test)),
         "num_features": len(feature_cols),
     }
 
