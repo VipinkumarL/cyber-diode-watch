@@ -1,17 +1,26 @@
 """
 SIH26145 ML Model Loader.
 
-Loads the trained Random Forest model and associated metadata
-(label encoder, scaler, feature names, training info) from disk.
+Loads trained Random Forest models and associated metadata from disk.
+
+Supports two model types:
+  1. CICIDS2017 model (rf_cicids2017.joblib) — real CICIDS2017 data
+  2. Synthetic model (rf_classifier.joblib) — fallback synthetic data
 
 Model files are expected in backend/ml_models/:
-  - rf_classifier.joblib   — trained RandomForestClassifier
-  - scaler.joblib          — fitted StandardScaler
-  - label_encoder.joblib   — fitted LabelEncoder
-  - model_info.joblib      — dict with feature names, class names, metrics
+  For CICIDS2017:
+    - rf_cicids2017.joblib
+    - scaler_cicids2017.joblib
+    - label_encoder_cicids2017.joblib
+    - model_info_cicids2017.joblib
+  For synthetic (legacy):
+    - rf_classifier.joblib
+    - scaler.joblib
+    - label_encoder.joblib
+    - model_info.joblib
 
-If any file is missing, is_model_loaded() returns False and
-the backend continues to function with baseline detectors only.
+Priority: CICIDS2017 model is preferred over synthetic.
+If neither is available, is_model_loaded() returns False.
 """
 
 from __future__ import annotations
@@ -30,44 +39,43 @@ _DEFAULT_MODEL_DIR = os.path.join(
     "ml_models",
 )
 
+# Current loaded model state
 _model: Any = None
 _scaler: Any = None
 _label_encoder: Any = None
 _model_info: dict[str, Any] = {}
 _model_dir: str = _DEFAULT_MODEL_DIR
+_model_source: str = ""  # "CICIDS2017" or "synthetic"
 
 
-def load_model(model_dir: Optional[str] = None) -> bool:
+def _try_load_model(model_dir: str, prefix: str) -> bool:
     """
-    Load the trained model from disk.
+    Try to load model files with a given prefix.
 
     Args:
         model_dir: Directory containing model files.
-                   Defaults to backend/ml_models/.
+        prefix: File prefix (e.g., "rf_cicids2017" or "rf_classifier").
 
     Returns:
-        True if model loaded successfully, False otherwise.
+        True if loaded successfully, False otherwise.
     """
-    global _model, _scaler, _label_encoder, _model_info, _model_dir
+    global _model, _scaler, _label_encoder, _model_info, _model_source
 
-    if model_dir is not None:
-        _model_dir = model_dir
+    # Determine file names based on prefix
+    if prefix == "rf_cicids2017":
+        classifier_path = os.path.join(model_dir, "rf_cicids2017.joblib")
+        scaler_path = os.path.join(model_dir, "scaler_cicids2017.joblib")
+        encoder_path = os.path.join(model_dir, "label_encoder_cicids2017.joblib")
+        info_path = os.path.join(model_dir, "model_info_cicids2017.joblib")
     else:
-        _model_dir = _DEFAULT_MODEL_DIR
-
-    classifier_path = os.path.join(_model_dir, "rf_classifier.joblib")
-    scaler_path = os.path.join(_model_dir, "scaler.joblib")
-    encoder_path = os.path.join(_model_dir, "label_encoder.joblib")
-    info_path = os.path.join(_model_dir, "model_info.joblib")
+        classifier_path = os.path.join(model_dir, "rf_classifier.joblib")
+        scaler_path = os.path.join(model_dir, "scaler.joblib")
+        encoder_path = os.path.join(model_dir, "label_encoder.joblib")
+        info_path = os.path.join(model_dir, "model_info.joblib")
 
     # Check all files exist
     for path in [classifier_path, scaler_path, encoder_path, info_path]:
         if not os.path.exists(path):
-            logger.warning("ML model file not found: %s", path)
-            _model = None
-            _scaler = None
-            _label_encoder = None
-            _model_info = {}
             return False
 
     try:
@@ -76,21 +84,68 @@ def load_model(model_dir: Optional[str] = None) -> bool:
         _label_encoder = joblib.load(encoder_path)
         _model_info = joblib.load(info_path)
 
+        # Determine source
+        _model_source = _model_info.get("model_source", "synthetic")
+
         logger.info(
-            "ML model loaded: %s (%d classes, %d features)",
+            "ML model loaded: %s (%s) (%d classes, %d features)",
             _model_info.get("model_name", "RandomForest"),
+            _model_source,
             len(_model_info.get("classes", [])),
             len(_model_info.get("feature_names", [])),
         )
         return True
 
     except Exception as exc:
-        logger.error("Failed to load ML model: %s", exc)
+        logger.error("Failed to load ML model (%s): %s", prefix, exc)
         _model = None
         _scaler = None
         _label_encoder = None
         _model_info = {}
+        _model_source = ""
         return False
+
+
+def load_model(model_dir: Optional[str] = None) -> bool:
+    """
+    Load the trained model from disk.
+
+    Priority: CICIDS2017 model → synthetic model → None.
+
+    Args:
+        model_dir: Directory containing model files.
+                   Defaults to backend/ml_models/.
+
+    Returns:
+        True if any model loaded successfully, False otherwise.
+    """
+    global _model_dir
+
+    if model_dir is not None:
+        _model_dir = model_dir
+    else:
+        _model_dir = _DEFAULT_MODEL_DIR
+
+    # Reset state
+    global _model, _scaler, _label_encoder, _model_info, _model_source
+    _model = None
+    _scaler = None
+    _label_encoder = None
+    _model_info = {}
+    _model_source = ""
+
+    # Try CICIDS2017 model first (preferred)
+    if _try_load_model(_model_dir, "rf_cicids2017"):
+        logger.info("Loaded CICIDS2017 model (real data)")
+        return True
+
+    # Fall back to synthetic model
+    if _try_load_model(_model_dir, "rf_classifier"):
+        logger.info("Loaded synthetic model (fallback)")
+        return True
+
+    logger.warning("No ML model files found in %s", _model_dir)
+    return False
 
 
 def is_model_loaded() -> bool:
@@ -121,3 +176,8 @@ def get_model_info() -> dict[str, Any]:
 def get_model_dir() -> str:
     """Return the current model directory path."""
     return _model_dir
+
+
+def get_model_source() -> str:
+    """Return the model source: 'CICIDS2017', 'synthetic', or ''."""
+    return _model_source

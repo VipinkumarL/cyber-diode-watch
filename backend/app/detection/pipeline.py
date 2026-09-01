@@ -26,7 +26,7 @@ from ..models.schemas import (
     Severity,
     ThreatClass,
 )
-from ..ml.model import is_model_loaded
+from ..ml.model import get_model_info, get_model_source, is_model_loaded
 from ..ml.predictor import MLPrediction, predict_flow
 from .c2_beaconing import C2BeaconDetector
 from .ddos import DDoSDetector
@@ -101,6 +101,13 @@ class DetectionPipeline:
         self, prediction: MLPrediction, flow: NetworkFlow
     ) -> Alert:
         """Convert an ML prediction to an Alert for storage/display."""
+        source_label = (
+            "CICIDS2017 real data"
+            if prediction.model_source == "CICIDS2017"
+            else "synthetic CICIDS2017-like data"
+        )
+        method_label = f"Random Forest Classifier (trained on {source_label})"
+
         return Alert(
             alertId=f"ML-{flow.timestamp}-{flow.flowId[-7:]}",
             timestamp=flow.timestamp,
@@ -117,14 +124,16 @@ class DetectionPipeline:
             supportingEvidence={
                 "model": prediction.model_name,
                 "version": prediction.model_version,
+                "model_source": prediction.model_source,
                 "class_probabilities": prediction.class_probabilities,
                 "inference_latency_ms": prediction.inference_latency_ms,
-                "method": "Random Forest Classifier (trained on synthetic CICIDS2017-like data)",
+                "method": method_label,
             },
             description=(
                 f"ML classification: {prediction.threat_class.value} "
                 f"(confidence {prediction.confidence:.1%}) "
-                f"by {prediction.model_name} v{prediction.model_version}"
+                f"by {prediction.model_name} v{prediction.model_version} "
+                f"[{prediction.model_source}]"
             ),
             status="new",
             scenario=flow.scenario,
@@ -191,19 +200,36 @@ class DetectionPipeline:
 
         # Add ML detector info
         ml_status = DetectorStatus.ACTIVE if is_model_loaded() else DetectorStatus.NOT_TRAINED
-        ml_info = DetectorInfo(
-            name="ML Random Forest Classifier",
-            threatClass=ThreatClass.Normal,  # Multi-class, not specific
-            status=ml_status,
-            method="Random Forest (trained on synthetic CICIDS2017-like data)",
-            description=(
+        model_source = get_model_source()
+        model_info = get_model_info()
+
+        if model_source == "CICIDS2017":
+            method_label = "Random Forest (trained on CICIDS2017 real data)"
+            description = (
+                "Binary Random Forest classifier (BENIGN vs ATTACK) trained "
+                "on the CICIDS2017 dataset with real labeled network flows. "
+                f"Uses {model_info.get('num_features', 'N/A')} flow-level features. "
+                f"Test accuracy: {model_info.get('metrics', {}).get('accuracy', 'N/A')}. "
+                "Acts as a general attack detector alongside the six "
+                "threat-specific baseline detectors."
+            )
+        else:
+            method_label = "Random Forest (trained on synthetic CICIDS2017-like data)"
+            description = (
                 "Multi-class Random Forest classifier trained on synthetic "
                 "network flow data mimicking CICIDS2017 patterns. Classifies "
                 "flows into 7 categories: Normal, DDoS, C2_Beaconing, "
                 "DGA_DNS_Tunneling, Encrypted_Malware, Reconnaissance, "
                 "Data_Exfiltration. Uses 11 flow-level features with "
                 "StandardScaler normalization."
-            ),
+            )
+
+        ml_info = DetectorInfo(
+            name="ML Random Forest Classifier",
+            threatClass=ThreatClass.Normal,  # Multi-class or binary, not specific
+            status=ml_status,
+            method=method_label,
+            description=description,
         )
         infos.append(ml_info)
         return infos

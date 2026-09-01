@@ -1,77 +1,154 @@
-"""Shared test fixtures for SIH26145 backend tests."""
+"""Shared test fixtures for the backend test suite."""
+
+import sys
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
-from main import app
-from app.services import store
+# Add backend/ to path so imports work
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 from app.ml.model import load_model
+from main import app
+
+
+@pytest.fixture(scope="session", autouse=True)
+def load_ml_model():
+    """Load the ML model once for all tests."""
+    # Load from default location (backend/ml_models/)
+    success = load_model()
+    yield success
+
+
+@pytest.fixture(scope="session")
+def client(load_ml_model):
+    """Create a test client for the FastAPI app."""
+    return TestClient(app, raise_server_exceptions=False)
 
 
 @pytest.fixture(autouse=True)
-def clear_store():
-    """Clear all data stores before each test."""
+def _clear_store():
+    """Clear the in-memory store before each test to prevent cross-test leakage."""
+    from app.services import store
     store.clear_all()
-    store.reset_counters()
     yield
     store.clear_all()
-    store.reset_counters()
-
-
-@pytest.fixture(autouse=True, scope="session")
-def load_ml_model():
-    """Load the ML model once for all tests."""
-    load_model()
-    yield
 
 
 @pytest.fixture
-def client():
-    """Provide a FastAPI TestClient."""
-    return TestClient(app)
-
-
-@pytest.fixture
-def sample_flow():
-    """Provide a minimal valid NetworkFlow dict."""
+def normal_flow():
+    """A clearly normal network flow."""
     return {
-        "flowId": "FLOW-0000001",
-        "timestamp": 1725120000000,
+        "flowId": "flow-normal-001",
+        "timestamp": 1700000000000,
         "sourceIp": "192.168.1.100",
-        "destinationIp": "10.0.1.1",
+        "destinationIp": "93.184.216.34",
         "protocol": "TCP",
         "sourcePort": 54321,
-        "destinationPort": 443,
-        "flowDuration": 1.5,
-        "totalPackets": 200,
-        "packetsPerSecond": 133.3,
-        "bytesPerSecond": 150000.0,
-        "totalBytes": 225000,
+        "destinationPort": 80,
+        "flowDuration": 5.0,
+        "totalPackets": 50,
+        "packetsPerSecond": 10.0,
+        "bytesPerSecond": 50000.0,
+        "totalBytes": 250000,
         "classification": "Normal",
         "confidence": 0.0,
         "severity": "INFO",
+        "sourceEntropy": 2.0,
+        "destinationConcentration": 0.1,
+        "packetLengthMean": 500.0,
+        "packetLengthStd": 200.0,
         "isSuspicious": False,
-        "scenario": "normal",
+    }
+
+
+@pytest.fixture
+def ddos_flow():
+    """A clearly suspicious DDoS flow."""
+    return {
+        "flowId": "flow-ddos-001",
+        "timestamp": 1700000001000,
+        "sourceIp": "10.0.0.1",
+        "destinationIp": "192.168.1.1",
+        "protocol": "UDP",
+        "sourcePort": 12345,
+        "destinationPort": 53,
+        "flowDuration": 0.1,
+        "totalPackets": 500000,
+        "packetsPerSecond": 5000000.0,
+        "bytesPerSecond": 500000000.0,
+        "totalBytes": 50000000,
+        "classification": "Normal",
+        "confidence": 0.0,
+        "severity": "INFO",
+        "sourceEntropy": 7.0,
+        "destinationConcentration": 0.95,
+        "packetLengthMean": 100.0,
+        "packetLengthStd": 30.0,
+        "isSuspicious": False,
+        "scenario": "ddos",
+    }
+
+
+@pytest.fixture
+def normal_flow_dict(normal_flow):
+    """Normal flow as a plain dict (for direct JSON requests)."""
+    return normal_flow
+
+
+@pytest.fixture
+def ddos_flow_dict(ddos_flow):
+    """DDoS flow as a plain dict."""
+    return ddos_flow
+
+
+# ── Legacy fixtures (used by existing tests) ────────────────────
+
+@pytest.fixture
+def sample_flow():
+    """A minimal flow dict for API tests (normal flow on port 80)."""
+    return {
+        "flowId": "FLOW-0000001",
+        "timestamp": 1700000000000,
+        "sourceIp": "192.168.1.100",
+        "destinationIp": "93.184.216.34",
+        "protocol": "TCP",
+        "sourcePort": 54321,
+        "destinationPort": 80,
+        "flowDuration": 5.0,
+        "totalPackets": 50,
+        "packetsPerSecond": 10.0,
+        "bytesPerSecond": 50000.0,
+        "totalBytes": 250000,
+        "classification": "Normal",
+        "confidence": 0.0,
+        "severity": "INFO",
+        "sourceEntropy": 2.0,
+        "destinationConcentration": 0.1,
+        "packetLengthMean": 500.0,
+        "packetLengthStd": 200.0,
+        "isSuspicious": False,
     }
 
 
 @pytest.fixture
 def sample_alert():
-    """Provide a minimal valid Alert dict."""
+    """A minimal alert dict for API tests."""
     return {
-        "alertId": "ALT-1725120000000-0001",
-        "timestamp": 1725120000000,
+        "alertId": "ALT-TEST-001",
+        "timestamp": 1700000001000,
         "flowId": "FLOW-0000001",
         "threatClass": "DDoS",
         "confidence": 0.95,
         "severity": "CRITICAL",
-        "sourceIp": "192.168.1.100",
-        "destinationIp": "10.0.1.1",
+        "sourceIp": "10.0.0.1",
+        "destinationIp": "192.168.1.1",
         "protocol": "UDP",
-        "destinationPort": 80,
-        "detector": "DDoS-RF-v1",
-        "detectionLatencyMs": 84,
-        "supportingEvidence": {"packets_per_second": 18420},
-        "description": "DDoS attack detected: 18420 packets/sec",
+        "destinationPort": 53,
+        "detector": "DDoS Baseline Detector",
+        "detectionLatencyMs": 5,
+        "supportingEvidence": {},
+        "description": "Test alert",
         "status": "new",
     }

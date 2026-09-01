@@ -179,6 +179,7 @@ class SystemMetrics(BaseModel):
 class HealthResponse(BaseModel):
     status: Literal["ok", "degraded", "error"] = "ok"
     model_loaded: bool = False
+    model_source: str = ""  # "CICIDS2017" or "synthetic" or ""
     db_status: str = "in_memory"
 
 

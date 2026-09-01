@@ -6,6 +6,13 @@ Returns predicted class, probability, and inference latency.
 
 This module does NOT replace the existing six baseline detectors.
 It adds an ML-based classification layer that runs alongside them.
+
+Supports two model types:
+  1. CICIDS2017 binary (BENIGN/ATTACK) — real data
+  2. Synthetic multi-class (7 classes) — legacy fallback
+
+For binary models, ATTACK prediction triggers an alert.
+For multi-class models, each predicted class maps to a ThreatClass.
 """
 
 from __future__ import annotations
@@ -23,6 +30,7 @@ from .model import (
     get_model,
     get_model_info,
     get_scaler,
+    get_model_source,
     is_model_loaded,
 )
 
@@ -39,6 +47,7 @@ class MLPrediction:
     inference_latency_ms: int
     class_probabilities: dict[str, float]
     is_model_available: bool
+    model_source: str  # "CICIDS2017" or "synthetic"
 
 
 # Severity mapping from predicted class
@@ -51,6 +60,10 @@ _SEVERITY_MAP: dict[ThreatClass, Severity] = {
     ThreatClass.Data_Exfiltration: Severity.HIGH,
     ThreatClass.Normal: Severity.INFO,
 }
+
+# For binary CICIDS2017: ATTACK maps to HIGH severity
+_BINARY_ATTACK_SEVERITY = Severity.HIGH
+_BINARY_BENIGN_SEVERITY = Severity.INFO
 
 
 def predict_flow(flow: NetworkFlow) -> Optional[MLPrediction]:
@@ -70,17 +83,26 @@ def predict_flow(flow: NetworkFlow) -> Optional[MLPrediction]:
     scaler = get_scaler()
     encoder = get_label_encoder()
     info = get_model_info()
+    model_source = get_model_source()
 
     if model is None or scaler is None or encoder is None:
         return None
 
     start_time = time.time()
 
-    # Extract features in the exact order used during training
-    features = flow_to_feature_vector(flow)
+    # Extract features in the order used during training
+    # The model stores its own feature_names in model_info
+    model_feature_names = info.get("feature_names", FEATURE_NAMES)
+
+    # Map NetworkFlow to features compatible with the model's training features
+    features = _extract_model_features(flow, model_feature_names)
 
     # Reshape for single-sample prediction and scale
     X = np.array([features], dtype=np.float64)
+
+    # Handle NaN/inf
+    X = np.nan_to_num(X, nan=0.0, posinf=0.0, neginf=0.0)
+
     X_scaled = scaler.transform(X)
 
     # Predict class and probabilities
@@ -98,8 +120,18 @@ def predict_flow(flow: NetworkFlow) -> Optional[MLPrediction]:
     }
 
     # Map class name to ThreatClass enum
-    threat_class = _class_name_to_threat(class_name)
-    severity = _SEVERITY_MAP.get(threat_class, Severity.MEDIUM)
+    threat_class = _class_name_to_threat(class_name, model_source)
+
+    # Severity based on model source
+    if model_source == "CICIDS2017":
+        severity = _BINARY_ATTACK_SEVERITY if class_name == "ATTACK" else _BINARY_BENIGN_SEVERITY
+        if class_name == "BENIGN":
+            threat_class = ThreatClass.Normal
+            severity = Severity.INFO
+        else:
+            severity = _BINARY_ATTACK_SEVERITY
+    else:
+        severity = _SEVERITY_MAP.get(threat_class, Severity.MEDIUM)
 
     inference_latency_ms = int((time.time() - start_time) * 1000)
 
@@ -112,18 +144,94 @@ def predict_flow(flow: NetworkFlow) -> Optional[MLPrediction]:
         inference_latency_ms=inference_latency_ms,
         class_probabilities=class_probabilities,
         is_model_available=True,
+        model_source=model_source,
     )
 
 
-def _class_name_to_threat(class_name: str) -> ThreatClass:
-    """Map a string class name to a ThreatClass enum value."""
-    mapping = {
-        "Normal": ThreatClass.Normal,
-        "DDoS": ThreatClass.DDoS,
-        "C2_Beaconing": ThreatClass.C2_Beaconing,
-        "DGA_DNS_Tunneling": ThreatClass.DGA_DNS_Tunneling,
-        "Encrypted_Malware": ThreatClass.Encrypted_Malware,
-        "Reconnaissance": ThreatClass.Reconnaissance,
-        "Data_Exfiltration": ThreatClass.Data_Exfiltration,
+def _extract_model_features(
+    flow: NetworkFlow, model_feature_names: list[str]
+) -> list[float]:
+    """
+    Extract features from a NetworkFlow matching the model's feature order.
+
+    For CICIDS2017 models (12 features), the feature names differ from
+    the original 11-feature synthetic model. This function maps between them.
+
+    CICIDS2017 feature mapping:
+      flowDuration            → flow.flowDuration
+      totalFwdPackets         → estimated from flow.totalPackets
+      totalBwdPackets         → estimated (0 for single-direction)
+      totalBytes              → flow.totalBytes
+      bytesPerSecond          → flow.bytesPerSecond
+      packetsPerSecond        → flow.packetsPerSecond
+      destinationPort         → flow.destinationPort
+      sourcePort              → flow.sourcePort
+      packetLengthMean        → flow.packetLengthMean
+      packetLengthStd         → flow.packetLengthStd
+      fwdPacketLengthMean     → flow.packetLengthMean (best approximation)
+      bwdPacketLengthMean     → 0.0 (not available in unidirectional data)
+
+    For synthetic models (11 features), use the original mapping.
+    """
+    # Build a lookup from field name to value
+    feature_map = {
+        "flowDuration": float(flow.flowDuration),
+        "totalPackets": float(flow.totalPackets),
+        "totalFwdPackets": float(flow.totalPackets),  # Best approximation
+        "totalBwdPackets": 0.0,  # Not available in unidirectional data
+        "packetsPerSecond": float(flow.packetsPerSecond),
+        "bytesPerSecond": float(flow.bytesPerSecond),
+        "totalBytes": float(flow.totalBytes),
+        "sourcePort": float(flow.sourcePort),
+        "destinationPort": float(flow.destinationPort),
+        "sourceEntropy": flow.sourceEntropy if flow.sourceEntropy is not None else 0.0,
+        "destinationConcentration": (
+            flow.destinationConcentration
+            if flow.destinationConcentration is not None
+            else 0.0
+        ),
+        "packetLengthMean": (
+            flow.packetLengthMean if flow.packetLengthMean is not None else 0.0
+        ),
+        "packetLengthStd": (
+            flow.packetLengthStd if flow.packetLengthStd is not None else 0.0
+        ),
+        "fwdPacketLengthMean": (
+            flow.packetLengthMean if flow.packetLengthMean is not None else 0.0
+        ),
+        "bwdPacketLengthMean": 0.0,  # Not available in unidirectional data
     }
-    return mapping.get(class_name, ThreatClass.Normal)
+
+    features = []
+    for name in model_feature_names:
+        features.append(feature_map.get(name, 0.0))
+
+    return features
+
+
+def _class_name_to_threat(class_name: str, model_source: str) -> ThreatClass:
+    """
+    Map a string class name to a ThreatClass enum value.
+
+    For CICIDS2017 binary: "BENIGN" → Normal, "ATTACK" → DDoS (generic attack).
+    For synthetic multi-class: maps each class directly.
+    """
+    if model_source == "CICIDS2017":
+        # Binary classification
+        mapping = {
+            "BENIGN": ThreatClass.Normal,
+            "ATTACK": ThreatClass.DDoS,  # Generic attack placeholder
+        }
+        return mapping.get(class_name, ThreatClass.Normal)
+    else:
+        # Multi-class synthetic model
+        mapping = {
+            "Normal": ThreatClass.Normal,
+            "DDoS": ThreatClass.DDoS,
+            "C2_Beaconing": ThreatClass.C2_Beaconing,
+            "DGA_DNS_Tunneling": ThreatClass.DGA_DNS_Tunneling,
+            "Encrypted_Malware": ThreatClass.Encrypted_Malware,
+            "Reconnaissance": ThreatClass.Reconnaissance,
+            "Data_Exfiltration": ThreatClass.Data_Exfiltration,
+        }
+        return mapping.get(class_name, ThreatClass.Normal)
