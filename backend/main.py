@@ -32,6 +32,7 @@ from app.api import (
     statistics,
     websocket,
 )
+from app.ml.model import load_model
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -42,7 +43,7 @@ app = FastAPI(
         "AI-Based Detection of Cyber Threats in Unidirectional IP Traffic. "
         "Passive monitoring backend — read-only ingest, no return path."
     ),
-    version="0.1.0",
+    version="0.2.0",
 )
 
 # ── CORS — allow the Vite dev server to connect ───────────────────
@@ -69,6 +70,19 @@ app.include_router(detectors.router)
 app.include_router(predict.router)
 app.include_router(replay.router)
 app.include_router(websocket.router)
+
+
+@app.on_event("startup")
+async def startup_event() -> None:
+    """Load the ML model on startup."""
+    model_loaded = load_model()
+    if model_loaded:
+        logger.info("ML model loaded successfully — ML predictions active")
+    else:
+        logger.warning(
+            "ML model not found — running with baseline detectors only. "
+            "Train a model with: python -m training.train"
+        )
 
 
 @app.get("/")

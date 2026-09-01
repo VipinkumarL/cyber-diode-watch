@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 
 from main import app
 from app.services import store
+from app.ml.model import load_model
 
 
 @pytest.fixture(autouse=True)
@@ -15,6 +16,13 @@ def clear_store():
     yield
     store.clear_all()
     store.reset_counters()
+
+
+@pytest.fixture(autouse=True, scope="session")
+def load_ml_model():
+    """Load the ML model once for all tests."""
+    load_model()
+    yield
 
 
 @pytest.fixture

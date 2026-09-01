@@ -7,6 +7,7 @@ from ..features.common import extract_features
 from ..models.schemas import (
     FlowsResponse,
     NetworkFlow,
+    ThreatClass,
 )
 from ..services import store
 
@@ -18,24 +19,28 @@ async def ingest_flow(flow: NetworkFlow) -> NetworkFlow:
     """
     Ingest a single network flow record and run the full detection pipeline.
 
-    All 6 detectors are evaluated against the incoming flow.
-    If any detector triggers, the flow is classified and alerts are stored.
-
-    This endpoint runs the same pipeline as POST /api/predict.
-    The caller should use one or the other, not both, for the same flow.
+    Runs ML model (if loaded) + all 6 baseline detectors.
+    If any detector or ML model triggers, the flow is classified and alerts stored.
     """
-    # Run the full detection pipeline
+    # Run ML prediction
+    ml_prediction = pipeline.predict_ml(flow)
+
+    # Run the full baseline detection pipeline
     alerts = pipeline.analyze(flow)
+
+    # If ML model is loaded, add its prediction as an alert
+    if ml_prediction is not None:
+        ml_alert = pipeline.ml_to_alert(ml_prediction, flow)
+        alerts.append(ml_alert)
 
     # Update flow classification if any threat detected
     if alerts:
-        # Use the highest-confidence alert for classification
         best = pipeline.get_best_alert(alerts)
         if best:
             flow.classification = best.threatClass
             flow.confidence = best.confidence
             flow.severity = best.severity
-            flow.isSuspicious = True
+            flow.isSuspicious = best.threatClass != ThreatClass.Normal
 
         # Store all alerts
         for alert in alerts:
