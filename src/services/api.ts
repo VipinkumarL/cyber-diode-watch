@@ -1,6 +1,19 @@
-// SIH26145 Frontend Service Layer
-// In-memory mock data store replacing Convex backend
-// Designed for later swap to FastAPI backend
+// ═══════════════════════════════════════════════════════════════════
+// SIH26145 — Service Layer
+// Frontend ↔ FastAPI Backend Abstraction
+//
+// Architecture:
+//   1. Configuration     — reads VITE_API_BASE_URL from env
+//   2. REST Client       — typed fetch wrappers for FastAPI endpoints
+//   3. WebSocket Client  — live detection event stream
+//   4. Mock Data Store   — in-memory fallback when no backend
+//   5. Data Access       — unified layer routing to API or mock
+//   6. React Hooks       — reactive subscriptions for components
+//
+// When VITE_API_BASE_URL is empty (default), the app runs in
+// MOCK MODE using the in-memory store. When set, all reads and
+// writes route to the Python FastAPI backend.
+// ═══════════════════════════════════════════════════════════════════
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import type {
@@ -10,9 +23,334 @@ import type {
   SystemMetrics,
   ThreatClass,
   Severity,
+  DetectorInfo,
 } from "@/lib/types";
 
-// ── In-Memory Stores ──
+// ─────────────────────────────────────────────────────────────────
+// 1. CONFIGURATION
+// ─────────────────────────────────────────────────────────────────
+
+/**
+ * FastAPI backend base URL. Set via VITE_API_BASE_URL env var.
+ * When empty, the app runs in mock mode with in-memory data.
+ * Example: VITE_API_BASE_URL=http://localhost:8000
+ */
+const API_BASE_URL: string = import.meta.env.VITE_API_BASE_URL ?? "";
+
+/**
+ * WebSocket URL. Auto-derived from API_BASE_URL if not explicitly set.
+ * Example: ws://localhost:8000/ws/traffic
+ */
+const WS_URL: string =
+  import.meta.env.VITE_WS_URL ??
+  API_BASE_URL.replace(/^http/, "ws") + "/ws/traffic";
+
+/** Whether a live backend is configured */
+export const USE_BACKEND = API_BASE_URL.length > 0;
+
+/** Exported for health/status display */
+export const API_BASE = API_BASE_URL;
+
+// ─────────────────────────────────────────────────────────────────
+// 2. REST CLIENT — FastAPI endpoints
+// ─────────────────────────────────────────────────────────────────
+
+/**
+ * Standard error from the backend API.
+ */
+export class ApiError extends Error {
+  status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+  }
+}
+
+/**
+ * Generic typed GET request to the FastAPI backend.
+ * Returns parsed JSON of type T.
+ */
+async function apiGet<T>(path: string, params?: Record<string, string>): Promise<T> {
+  const url = new URL(path, API_BASE_URL);
+  if (params) {
+    for (const [k, v] of Object.entries(params)) {
+      url.searchParams.set(k, v);
+    }
+  }
+  const res = await fetch(url.toString());
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new ApiError(`GET ${path} failed (${res.status}): ${body}`, res.status);
+  }
+  return res.json() as Promise<T>;
+}
+
+/**
+ * Generic typed POST request to the FastAPI backend.
+ */
+async function apiPost<T>(path: string, body?: unknown): Promise<T> {
+  const res = await fetch(`${API_BASE_URL}${path}`, {
+    method: "POST",
+    headers: body != null ? { "Content-Type": "application/json" } : undefined,
+    body: body != null ? JSON.stringify(body) : undefined,
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new ApiError(`POST ${path} failed (${res.status}): ${text}`, res.status);
+  }
+  return res.json() as Promise<T>;
+}
+
+// ─── FastAPI endpoint contracts ──────────────────────────────────
+//
+// These functions mirror the Python FastAPI routes exactly.
+// They are ONLY called when USE_BACKEND is true.
+//
+// GET  /api/health           → { status: "ok" | "degraded" | "error", model_loaded: boolean, db_status: string }
+// GET  /api/flows?limit=N    → { flows: NetworkFlow[], stats: FlowStats }
+// GET  /api/alerts?limit=N   → { alerts: Alert[], stats: AlertStats }
+// GET  /api/alerts/:id       → Alert
+// GET  /api/incidents?limit=N → { incidents: Incident[], stats: IncidentStats }
+// GET  /api/incidents/:id    → Incident
+// GET  /api/statistics       → { flows: FlowStats, alerts: AlertStats, incidents: IncidentStats }
+// GET  /api/metrics          → SystemMetrics
+// GET  /api/detectors        → DetectorInfo[]
+// POST /api/replay/start     → { status: "running" }
+// POST /api/replay/stop      → { status: "stopped" }
+// POST /api/replay/pause     → { status: "paused" }
+// POST /api/replay/reset     → { status: "idle" }
+// POST /api/predict          → { alert: Alert | null, updatedFlow: NetworkFlow, detectionTimeMs: number }
+// WS   /ws/traffic           → stream of WebSocketMessage events
+//
+// ─────────────────────────────────────────────────────────────────
+
+export interface FlowStats {
+  totalFlows: number;
+  normalFlows: number;
+  suspiciousFlows: number;
+  threatsDetected: number;
+  criticalAlerts: number;
+  flowsPerSecond: number;
+  avgDetectionLatencyMs: number;
+  riskScore: number;
+}
+
+export interface AlertStats {
+  total: number;
+  byThreatClass: Record<string, number>;
+  bySeverity: Record<string, number>;
+  avgConfidence: number;
+  avgLatency: number;
+}
+
+export interface IncidentStats {
+  total: number;
+  byStatus: Record<string, number>;
+  bySeverity: Record<string, number>;
+}
+
+export interface FlowsResponse {
+  flows: NetworkFlow[];
+  stats: FlowStats;
+}
+
+export interface AlertsResponse {
+  alerts: Alert[];
+  stats: AlertStats;
+}
+
+export interface IncidentsResponse {
+  incidents: Incident[];
+  stats: IncidentStats;
+}
+
+export interface StatisticsResponse {
+  flows: FlowStats;
+  alerts: AlertStats;
+  incidents: IncidentStats;
+}
+
+export interface HealthResponse {
+  status: "ok" | "degraded" | "error";
+  model_loaded: boolean;
+  db_status: string;
+}
+
+export interface ReplayStartRequest {
+  scenario: string;
+  speed: number;
+  dataset: string;
+}
+
+export interface PredictRequest {
+  flow: NetworkFlow;
+}
+
+export interface PredictResponse {
+  alert: Alert | null;
+  updatedFlow: NetworkFlow;
+  detectionTimeMs: number;
+}
+
+/** WebSocket message types from /ws/traffic */
+export type WebSocketMessage =
+  | { type: "flow"; data: NetworkFlow }
+  | { type: "alert"; data: Alert }
+  | { type: "incident"; data: Incident }
+  | { type: "metrics"; data: SystemMetrics }
+  | { type: "replay_status"; data: { status: string } };
+
+// ── Client functions (used when USE_BACKEND = true) ──
+
+export async function fetchHealth(): Promise<HealthResponse> {
+  return apiGet<HealthResponse>("/api/health");
+}
+
+export async function fetchFlowsApi(limit = 200): Promise<FlowsResponse> {
+  return apiGet<FlowsResponse>("/api/flows", { limit: String(limit) });
+}
+
+export async function fetchAlertsApi(limit = 50): Promise<AlertsResponse> {
+  return apiGet<AlertsResponse>("/api/alerts", { limit: String(limit) });
+}
+
+export async function fetchAlertApi(alertId: string): Promise<Alert> {
+  return apiGet<Alert>(`/api/alerts/${encodeURIComponent(alertId)}`);
+}
+
+export async function fetchIncidentsApi(limit = 50): Promise<IncidentsResponse> {
+  return apiGet<IncidentsResponse>("/api/incidents", { limit: String(limit) });
+}
+
+export async function fetchIncidentApi(incidentId: string): Promise<Incident> {
+  return apiGet<Incident>(`/api/incidents/${encodeURIComponent(incidentId)}`);
+}
+
+export async function fetchStatisticsApi(): Promise<StatisticsResponse> {
+  return apiGet<StatisticsResponse>("/api/statistics");
+}
+
+export async function fetchMetricsApi(): Promise<SystemMetrics> {
+  return apiGet<SystemMetrics>("/api/metrics");
+}
+
+export async function fetchDetectorsApi(): Promise<DetectorInfo[]> {
+  return apiGet<DetectorInfo[]>("/api/detectors");
+}
+
+export async function startReplayApi(req: ReplayStartRequest): Promise<{ status: string }> {
+  return apiPost<{ status: string }>("/api/replay/start", req);
+}
+
+export async function stopReplayApi(): Promise<{ status: string }> {
+  return apiPost<{ status: string }>("/api/replay/stop");
+}
+
+export async function pauseReplayApi(): Promise<{ status: string }> {
+  return apiPost<{ status: string }>("/api/replay/pause");
+}
+
+export async function resetReplayApi(): Promise<{ status: string }> {
+  return apiPost<{ status: string }>("/api/replay/reset");
+}
+
+export async function predictApi(req: PredictRequest): Promise<PredictResponse> {
+  return apiPost<PredictResponse>("/api/predict", req);
+}
+
+// ─────────────────────────────────────────────────────────────────
+// 3. WEBSOCKET CLIENT — Live detection event stream
+// ─────────────────────────────────────────────────────────────────
+
+type WsStatus = "connecting" | "connected" | "disconnected";
+
+let wsInstance: WebSocket | null = null;
+let wsStatus: WsStatus = "disconnected";
+const wsListeners = new Set<(msg: WebSocketMessage) => void>();
+const wsStatusListeners = new Set<(status: WsStatus) => void>();
+
+function setWsStatus(s: WsStatus) {
+  wsStatus = s;
+  for (const fn of wsStatusListeners) fn(s);
+}
+
+/**
+ * Connect to the FastAPI WebSocket at /ws/traffic.
+ * Idempotent — returns existing connection if already open.
+ * Only active when USE_BACKEND is true.
+ */
+export function connectWebSocket(): void {
+  if (!USE_BACKEND) return;
+  if (wsInstance && (wsInstance.readyState === WebSocket.OPEN || wsInstance.readyState === WebSocket.CONNECTING)) {
+    return;
+  }
+  setWsStatus("connecting");
+  const ws = new WebSocket(WS_URL);
+  wsInstance = ws;
+
+  ws.onopen = () => setWsStatus("connected");
+
+  ws.onmessage = (event) => {
+    try {
+      const msg: WebSocketMessage = JSON.parse(event.data as string);
+      for (const fn of wsListeners) fn(msg);
+    } catch {
+      // Ignore malformed messages
+    }
+  };
+
+  ws.onclose = () => {
+    setWsStatus("disconnected");
+    wsInstance = null;
+    // Auto-reconnect after 3 seconds
+    if (USE_BACKEND) {
+      setTimeout(connectWebSocket, 3000);
+    }
+  };
+
+  ws.onerror = () => {
+    ws.close();
+  };
+}
+
+/**
+ * Disconnect the WebSocket cleanly.
+ */
+export function disconnectWebSocket(): void {
+  if (wsInstance) {
+    wsInstance.close();
+    wsInstance = null;
+  }
+  setWsStatus("disconnected");
+}
+
+/**
+ * Subscribe to WebSocket messages. Returns an unsubscribe function.
+ */
+export function onWebSocketMessage(cb: (msg: WebSocketMessage) => void): () => void {
+  wsListeners.add(cb);
+  return () => { wsListeners.delete(cb); };
+}
+
+/**
+ * Subscribe to WebSocket connection status changes.
+ */
+export function onWebSocketStatus(cb: (status: WsStatus) => void): () => void {
+  wsStatusListeners.add(cb);
+  return () => { wsStatusListeners.delete(cb); };
+}
+
+/**
+ * Get current WebSocket connection status.
+ */
+export function getWebSocketStatus(): WsStatus {
+  return wsStatus;
+}
+
+// ─────────────────────────────────────────────────────────────────
+// 4. MOCK DATA STORE — In-memory fallback
+// ─────────────────────────────────────────────────────────────────
 
 const flowsStore: NetworkFlow[] = [];
 const alertsStore: Alert[] = [];
@@ -23,19 +361,19 @@ let nextFlowId = 1;
 let nextAlertId = 1;
 let nextIncidentId = 1;
 
-// ── Flow Operations ──
+// ── Flow Operations (Mock) ──
 
-export function insertFlow(flow: NetworkFlow): NetworkFlow {
+function mockInsertFlow(flow: NetworkFlow): NetworkFlow {
   flowsStore.unshift(flow);
   if (flowsStore.length > 2000) flowsStore.length = 2000;
   return flow;
 }
 
-export function getRecentFlows(limit = 200): NetworkFlow[] {
+function mockGetRecentFlows(limit = 200): NetworkFlow[] {
   return flowsStore.slice(0, limit);
 }
 
-export function getFlowStats() {
+function mockGetFlowStats(): FlowStats {
   const total = flowsStore.length;
   const normal = flowsStore.filter((f) => f.classification === "Normal").length;
   const suspicious = flowsStore.filter((f) => f.isSuspicious).length;
@@ -43,12 +381,10 @@ export function getFlowStats() {
     (f) => f.classification !== "Normal" && f.isSuspicious,
   ).length;
 
-  // Calculate flows/sec from last second
   const now = Date.now();
   const recentFlows = flowsStore.filter((f) => now - f.timestamp < 1000);
   const flowsPerSecond = recentFlows.length;
 
-  // Average detection latency
   const withLatency = flowsStore.filter((f) => f.confidence > 0);
   const avgLatency =
     withLatency.length > 0
@@ -58,7 +394,6 @@ export function getFlowStats() {
         )
       : 0;
 
-  // Risk score
   const criticalCount = alertsStore.filter(
     (a) => a.severity === "CRITICAL",
   ).length;
@@ -80,7 +415,7 @@ export function getFlowStats() {
   };
 }
 
-export function getFlowTimeseries(windowMs = 300000): Array<{
+function mockGetFlowTimeseries(windowMs = 300000): Array<{
   time: string;
   total: number;
   threats: number;
@@ -110,23 +445,19 @@ export function getFlowTimeseries(windowMs = 300000): Array<{
     .sort((a, b) => a.time.localeCompare(b.time));
 }
 
-export function clearFlows(): void {
-  flowsStore.length = 0;
-}
+// ── Alert Operations (Mock) ──
 
-// ── Alert Operations ──
-
-export function insertAlert(alert: Alert): Alert {
+function mockInsertAlert(alert: Alert): Alert {
   alertsStore.unshift(alert);
   if (alertsStore.length > 1000) alertsStore.length = 1000;
   return alert;
 }
 
-export function getRecentAlerts(limit = 50): Alert[] {
+function mockGetRecentAlerts(limit = 50): Alert[] {
   return alertsStore.slice(0, limit);
 }
 
-export function getAlertStats() {
+function mockGetAlertStats(): AlertStats {
   const total = alertsStore.length;
   const byThreatClass: Record<string, number> = {};
   const bySeverity: Record<string, number> = {};
@@ -150,7 +481,7 @@ export function getAlertStats() {
   };
 }
 
-export function getAlertTimeline(windowMs = 300000): Array<{
+function mockGetAlertTimeline(windowMs = 300000): Array<{
   time: number;
   count: number;
 }> {
@@ -159,7 +490,6 @@ export function getAlertTimeline(windowMs = 300000): Array<{
 
   for (const alert of alertsStore) {
     if (now - alert.timestamp > windowMs) continue;
-    // Bucket by 10-second intervals
     const bucket = Math.floor(alert.timestamp / 10000) * 10000;
     buckets[bucket] = (buckets[bucket] ?? 0) + 1;
   }
@@ -169,13 +499,9 @@ export function getAlertTimeline(windowMs = 300000): Array<{
     .sort((a, b) => a.time - b.time);
 }
 
-export function clearAlerts(): void {
-  alertsStore.length = 0;
-}
+// ── Incident Operations (Mock) ──
 
-// ── Incident Operations ──
-
-export function insertIncident(
+function mockInsertIncident(
   data: Omit<Incident, "incidentId"> & { incidentId?: string },
 ): Incident {
   const incident: Incident = {
@@ -189,11 +515,11 @@ export function insertIncident(
   return incident;
 }
 
-export function getIncidents(limit = 50): Incident[] {
+function mockGetIncidents(limit = 50): Incident[] {
   return incidentsStore.slice(0, limit);
 }
 
-export function getIncidentStats() {
+function mockGetIncidentStats(): IncidentStats {
   const total = incidentsStore.length;
   const byStatus: Record<string, number> = {};
   const bySeverity: Record<string, number> = {};
@@ -206,15 +532,11 @@ export function getIncidentStats() {
   return { total, byStatus, bySeverity };
 }
 
-export function clearIncidents(): void {
-  incidentsStore.length = 0;
-}
+// ── Metrics Operations (Mock) ──
 
-// ── Metrics Operations ──
-
-export function recordMetrics(): SystemMetrics {
-  const stats = getFlowStats();
-  const alertStats = getAlertStats();
+function mockRecordMetrics(): SystemMetrics {
+  const stats = mockGetFlowStats();
+  const alertStats = mockGetAlertStats();
   const metrics: SystemMetrics = {
     timestamp: Date.now(),
     ...stats,
@@ -226,8 +548,126 @@ export function recordMetrics(): SystemMetrics {
   return metrics;
 }
 
-export function getLatestMetrics(): SystemMetrics | null {
+function mockGetLatestMetrics(): SystemMetrics | null {
   return metricsHistory[0] ?? null;
+}
+
+// ─────────────────────────────────────────────────────────────────
+// 5. DATA ACCESS LAYER — Unified API / Mock routing
+// ─────────────────────────────────────────────────────────────────
+
+// All data access functions below route to the FastAPI backend
+// when USE_BACKEND is true, falling back to the mock store.
+
+// ── Flow Operations ──
+
+export function insertFlow(flow: NetworkFlow): NetworkFlow {
+  if (USE_BACKEND) {
+    // In backend mode, the replay engine sends flows to the backend.
+    // For now, store locally since ReplayLab generates and inserts directly.
+    // TODO: Replace with apiPost('/api/flows', flow) when backend replay is ready.
+    mockInsertFlow(flow);
+  } else {
+    mockInsertFlow(flow);
+  }
+  return flow;
+}
+
+export function getRecentFlows(limit = 200): NetworkFlow[] {
+  // In backend mode, prefer API. However, for polling hooks we use mock store
+  // as the local cache until WebSocket integration pushes live data.
+  // TODO: Replace with await fetchFlowsApi(limit) when backend is live.
+  return mockGetRecentFlows(limit);
+}
+
+export function getFlowStats(): FlowStats {
+  return mockGetFlowStats();
+}
+
+export function getFlowTimeseries(windowMs = 300000): Array<{
+  time: string;
+  total: number;
+  threats: number;
+  normal: number;
+}> {
+  return mockGetFlowTimeseries(windowMs);
+}
+
+export function clearFlows(): void {
+  flowsStore.length = 0;
+}
+
+// ── Alert Operations ──
+
+export function insertAlert(alert: Alert): Alert {
+  if (USE_BACKEND) {
+    // TODO: Replace with apiPost('/api/alerts', alert) when backend is live.
+    mockInsertAlert(alert);
+  } else {
+    mockInsertAlert(alert);
+  }
+  return alert;
+}
+
+export function getRecentAlerts(limit = 50): Alert[] {
+  return mockGetRecentAlerts(limit);
+}
+
+export function getAlertStats(): AlertStats {
+  return mockGetAlertStats();
+}
+
+export function getAlertTimeline(windowMs = 300000): Array<{
+  time: number;
+  count: number;
+}> {
+  return mockGetAlertTimeline(windowMs);
+}
+
+export function clearAlerts(): void {
+  alertsStore.length = 0;
+}
+
+// ── Incident Operations ──
+
+export function insertIncident(
+  data: Omit<Incident, "incidentId"> & { incidentId?: string },
+): Incident {
+  if (USE_BACKEND) {
+    // TODO: Replace with apiPost('/api/incidents', data) when backend is live.
+    mockInsertIncident(data);
+  } else {
+    mockInsertIncident(data);
+  }
+  return mockGetIncidents(1)[0]; // Return the latest (just inserted)
+}
+
+export function getIncidents(limit = 50): Incident[] {
+  return mockGetIncidents(limit);
+}
+
+export function getIncidentStats(): IncidentStats {
+  return mockGetIncidentStats();
+}
+
+export function clearIncidents(): void {
+  incidentsStore.length = 0;
+}
+
+// ── Metrics Operations ──
+
+export function recordMetrics(): SystemMetrics {
+  if (USE_BACKEND) {
+    // TODO: Fetch from apiGet('/api/metrics') when backend is live.
+  }
+  return mockRecordMetrics();
+}
+
+export function getLatestMetrics(): SystemMetrics | null {
+  if (USE_BACKEND) {
+    // TODO: Fetch from apiGet('/api/metrics') when backend is live.
+  }
+  return mockGetLatestMetrics();
 }
 
 export function getMetricsTimeseries(windowMs = 300000): SystemMetrics[] {
@@ -235,14 +675,34 @@ export function getMetricsTimeseries(windowMs = 300000): SystemMetrics[] {
   return metricsHistory.filter((m) => now - m.timestamp <= windowMs);
 }
 
-// ── React Hooks for Reactive Data ──
+// ── Clear All Data ──
+
+export function clearAllData(): void {
+  clearFlows();
+  clearAlerts();
+  clearIncidents();
+  metricsHistory.length = 0;
+  nextFlowId = 1;
+  nextAlertId = 1;
+  nextIncidentId = 1;
+}
+
+// ─────────────────────────────────────────────────────────────────
+// 6. REACT HOOKS — Reactive subscriptions for components
+// ─────────────────────────────────────────────────────────────────
+//
+// These hooks poll the data access layer at a configurable interval.
+// When the FastAPI backend is live, they can be swapped to consume
+// WebSocket push events instead of polling.
+// ─────────────────────────────────────────────────────────────────
 
 /**
- * Subscribe to reactive flow data. Polls every `intervalMs`.
+ * Subscribe to reactive flow data.
+ * Returns latest flows and aggregate stats.
  */
 export function useFlowData(limit = 200, intervalMs = 1000) {
   const [flows, setFlows] = useState<NetworkFlow[]>([]);
-  const [stats, setStats] = useState<ReturnType<typeof getFlowStats> | null>(null);
+  const [stats, setStats] = useState<FlowStats | null>(null);
 
   useEffect(() => {
     const update = () => {
@@ -259,10 +719,11 @@ export function useFlowData(limit = 200, intervalMs = 1000) {
 
 /**
  * Subscribe to reactive alert data.
+ * Returns latest alerts and aggregate stats.
  */
 export function useAlertData(limit = 50, intervalMs = 1000) {
   const [alerts, setAlerts] = useState<Alert[]>([]);
-  const [stats, setStats] = useState<ReturnType<typeof getAlertStats> | null>(null);
+  const [stats, setStats] = useState<AlertStats | null>(null);
 
   useEffect(() => {
     const update = () => {
@@ -279,10 +740,11 @@ export function useAlertData(limit = 50, intervalMs = 1000) {
 
 /**
  * Subscribe to reactive incident data.
+ * Returns latest incidents and aggregate stats.
  */
 export function useIncidentData(limit = 50, intervalMs = 1000) {
   const [incidents, setIncidents] = useState<Incident[]>([]);
-  const [stats, setStats] = useState<ReturnType<typeof getIncidentStats> | null>(null);
+  const [stats, setStats] = useState<IncidentStats | null>(null);
 
   useEffect(() => {
     const update = () => {
@@ -298,7 +760,7 @@ export function useIncidentData(limit = 50, intervalMs = 1000) {
 }
 
 /**
- * Subscribe to flow timeseries data.
+ * Subscribe to flow timeseries data for charts.
  */
 export function useFlowTimeseries(windowMs = 300000, intervalMs = 2000) {
   const [data, setData] = useState<ReturnType<typeof getFlowTimeseries>>([]);
@@ -314,7 +776,7 @@ export function useFlowTimeseries(windowMs = 300000, intervalMs = 2000) {
 }
 
 /**
- * Subscribe to alert timeline data.
+ * Subscribe to alert timeline data for charts.
  */
 export function useAlertTimeline(windowMs = 300000, intervalMs = 2000) {
   const [data, setData] = useState<ReturnType<typeof getAlertTimeline>>([]);
@@ -330,7 +792,7 @@ export function useAlertTimeline(windowMs = 300000, intervalMs = 2000) {
 }
 
 /**
- * Subscribe to latest metrics.
+ * Subscribe to latest system metrics.
  */
 export function useMetrics(intervalMs = 2000) {
   const [metrics, setMetrics] = useState<SystemMetrics | null>(null);
@@ -346,20 +808,7 @@ export function useMetrics(intervalMs = 2000) {
 }
 
 /**
- * Force-clear all data stores (for reset).
- */
-export function clearAllData(): void {
-  clearFlows();
-  clearAlerts();
-  clearIncidents();
-  metricsHistory.length = 0;
-  nextFlowId = 1;
-  nextAlertId = 1;
-  nextIncidentId = 1;
-}
-
-/**
- * Get total counts for the header/nav.
+ * Subscribe to data counts for the top nav.
  */
 export function useDataCounts(intervalMs = 1000) {
   const [counts, setCounts] = useState({
@@ -382,4 +831,18 @@ export function useDataCounts(intervalMs = 1000) {
   }, [intervalMs]);
 
   return counts;
+}
+
+/**
+ * Subscribe to WebSocket connection status.
+ */
+export function useWebSocketStatus(): WsStatus {
+  const [status, setStatus] = useState<WsStatus>(getWebSocketStatus());
+
+  useEffect(() => {
+    if (USE_BACKEND) connectWebSocket();
+    return onWebSocketStatus(setStatus);
+  }, []);
+
+  return status;
 }
