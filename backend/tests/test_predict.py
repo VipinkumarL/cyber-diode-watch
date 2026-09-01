@@ -4,14 +4,15 @@ import pytest
 
 
 def test_predict_returns_flow(client, sample_flow):
-    """POST /api/predict should return the flow and no alert (no model loaded)."""
+    """POST /api/predict should return the flow."""
     payload = {"flow": sample_flow}
     resp = client.post("/api/predict", json=payload)
     assert resp.status_code == 200
     data = resp.json()
     assert data["updatedFlow"]["flowId"] == sample_flow["flowId"]
-    assert data["alert"] is None
     assert "detectionTimeMs" in data
+    # sample_flow may trigger non-DDoS detectors (C2 on port 443)
+    # but the response structure is always valid
 
 
 def test_predict_stores_flow(client, sample_flow):
@@ -34,3 +35,33 @@ def test_predict_empty_body(client):
     """POST /api/predict with no body should return 422."""
     resp = client.post("/api/predict")
     assert resp.status_code == 422
+
+
+def test_predict_ddos_flow_has_alert(client):
+    """POST /api/predict with a clear DDoS flow should return an alert."""
+    ddos_flow = {
+        "flowId": "FLOW-PRED-DDOS",
+        "timestamp": 1725120000000,
+        "sourceIp": "10.0.0.1",
+        "destinationIp": "10.0.1.1",
+        "protocol": "UDP",
+        "sourcePort": 1234,
+        "destinationPort": 80,
+        "flowDuration": 0.3,
+        "totalPackets": 50000,
+        "packetsPerSecond": 15000.0,
+        "bytesPerSecond": 7500000.0,
+        "totalBytes": 2250000,
+        "classification": "Normal",
+        "confidence": 0.0,
+        "severity": "INFO",
+        "sourceEntropy": 7.5,
+        "destinationConcentration": 0.95,
+        "isSuspicious": False,
+        "scenario": "ddos",
+    }
+    resp = client.post("/api/predict", json={"flow": ddos_flow})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["alert"] is not None
+    assert data["alert"]["threatClass"] == "DDoS"

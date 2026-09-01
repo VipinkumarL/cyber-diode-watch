@@ -1,51 +1,45 @@
 """Flow ingestion and retrieval endpoints."""
 
-import time
-
 from fastapi import APIRouter, Query
 
-from ..detection.ddos import DDoSDetector
+from ..detection.pipeline import pipeline
 from ..features.common import extract_features
 from ..models.schemas import (
     FlowsResponse,
     NetworkFlow,
-    Severity,
-    ThreatClass,
 )
 from ..services import store
 
 router = APIRouter()
 
-_ddos = DDoSDetector()
-
 
 @router.post("/api/flows", response_model=NetworkFlow)
 async def ingest_flow(flow: NetworkFlow) -> NetworkFlow:
     """
-    Ingest a single network flow record and run DDoS detection.
+    Ingest a single network flow record and run the full detection pipeline.
 
-    This endpoint automatically analyzes each incoming flow using
-    the DDoS baseline detector. If DDoS behavior is detected, the
-    flow is classified accordingly and an alert is stored.
+    All 6 detectors are evaluated against the incoming flow.
+    If any detector triggers, the flow is classified and alerts are stored.
 
-    This ensures flows submitted via POST /api/flows receive the
-    same analysis as flows submitted via POST /api/predict.
-    The detector runs once per flow — no duplicate analysis occurs
-    when /api/predict is used for the same flow (the caller chooses
-    one endpoint or the other).
+    This endpoint runs the same pipeline as POST /api/predict.
+    The caller should use one or the other, not both, for the same flow.
     """
-    # Run DDoS detection
-    alert = _ddos.analyze(flow)
+    # Run the full detection pipeline
+    alerts = pipeline.analyze(flow)
 
-    # Update flow classification if threat detected
-    if alert:
-        flow.classification = ThreatClass.DDoS
-        flow.confidence = alert.confidence
-        flow.severity = alert.severity
-        flow.isSuspicious = True
+    # Update flow classification if any threat detected
+    if alerts:
+        # Use the highest-confidence alert for classification
+        best = pipeline.get_best_alert(alerts)
+        if best:
+            flow.classification = best.threatClass
+            flow.confidence = best.confidence
+            flow.severity = best.severity
+            flow.isSuspicious = True
 
-        # Store the alert
-        store.insert_alert(alert)
+        # Store all alerts
+        for alert in alerts:
+            store.insert_alert(alert)
 
     # Store the flow (after classification update)
     store.insert_flow(flow)
