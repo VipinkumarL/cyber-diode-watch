@@ -1,3 +1,4 @@
+import { useState, useEffect } from "react";
 import {
   HeartPulse,
   Server,
@@ -9,44 +10,121 @@ import {
   HardDrive,
   Layers,
 } from "lucide-react";
-import { useFlowData, useAlertData, useMetrics } from "@/services/api";
+import { useFlowData, useAlertData, useMetrics, fetchHealth, USE_BACKEND } from "@/services/api";
 import { useReplayStore } from "@/lib/store";
 
 export default function Health() {
   const { stats: flowStats } = useFlowData(0, 2000);
   const { stats: alertStats } = useAlertData(0, 2000);
   const replayState = useReplayStore();
+  const [backendHealth, setBackendHealth] = useState<{
+    status: "ok" | "degraded" | "error" | "unreachable";
+    modelLoaded: boolean;
+    dbStatus: string;
+  }>({
+    status: "unreachable",
+    modelLoaded: false,
+    dbStatus: "unknown",
+  });
+
+  // Poll backend health when backend is configured
+  useEffect(() => {
+    if (!USE_BACKEND) {
+      setBackendHealth({
+        status: "unreachable",
+        modelLoaded: false,
+        dbStatus: "mock_in_memory",
+      });
+      return;
+    }
+
+    let cancelled = false;
+
+    const checkHealth = async () => {
+      try {
+        const res = await fetchHealth();
+        if (!cancelled) {
+          setBackendHealth({
+            status: res.status,
+            modelLoaded: res.model_loaded,
+            dbStatus: res.db_status,
+          });
+        }
+      } catch {
+        if (!cancelled) {
+          setBackendHealth({
+            status: "unreachable",
+            modelLoaded: false,
+            dbStatus: "unknown",
+          });
+        }
+      }
+    };
+
+    checkHealth();
+    const timer = setInterval(checkHealth, 5000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, []);
 
   const isLoading = !flowStats;
+
+  const backendStatusLabel = backendHealth.status === "ok"
+    ? "online"
+    : backendHealth.status === "degraded"
+      ? "degraded"
+      : backendHealth.status === "error"
+        ? "error"
+        : "unreachable";
+
+  const modelStatusLabel = backendHealth.modelLoaded ? "loaded" : "not_loaded";
+
+  const wsStatusLabel = USE_BACKEND ? "connected" : "standalone";
+
+  const dbStatusLabel = backendHealth.dbStatus.includes("in_memory") || backendHealth.dbStatus === "mock_in_memory"
+    ? "online"
+    : backendHealth.dbStatus === "unknown"
+      ? "unknown"
+      : "online";
 
   const systemComponents = [
     {
       name: "Backend API",
-      status: "online",
+      status: backendStatusLabel,
       icon: Server,
-      detail: "FastAPI + Uvicorn (Future integration)",
-      color: "#0f9b8e",
+      detail: USE_BACKEND
+        ? `FastAPI + Uvicorn (${backendHealth.status === "ok" ? "Connected" : "Connection issue"})`
+        : "FastAPI + Uvicorn (Not configured)",
+      color: backendStatusLabel === "online" ? "#0f9b8e" : "#e94560",
     },
     {
       name: "ML Model",
-      status: "loaded",
+      status: modelStatusLabel,
       icon: Brain,
-      detail: "DDoS-RF-v1 — Random Forest Classifier",
-      color: "#533483",
+      detail: backendHealth.modelLoaded
+        ? "DDoS-RF-v1 — Random Forest Classifier"
+        : "No model loaded — interface ready",
+      color: modelStatusLabel === "loaded" ? "#533483" : "#8b8994",
     },
     {
       name: "Database",
-      status: "online",
+      status: dbStatusLabel,
       icon: Database,
-      detail: "In-Memory Store (PostgreSQL-ready schema)",
-      color: "#0f9b8e",
+      detail: backendHealth.dbStatus === "unknown"
+        ? "Status unknown"
+        : `In-Memory Store (${backendHealth.dbStatus})`,
+      color: dbStatusLabel === "online" ? "#0f9b8e" : "#8b8994",
     },
     {
       name: "WebSocket",
-      status: "connected",
+      status: wsStatusLabel,
       icon: Wifi,
-      detail: "Real-time flow & alert streaming",
-      color: "#0f9b8e",
+      detail: USE_BACKEND
+        ? "Real-time flow & alert streaming"
+        : "Standalone mode — no WebSocket",
+      color: wsStatusLabel === "connected" ? "#0f9b8e" : "#8b8994",
     },
   ];
 
@@ -93,6 +171,12 @@ export default function Health() {
     online: { bg: "#0f9b8e15", text: "#0f9b8e", dot: "#0f9b8e" },
     loaded: { bg: "#53348315", text: "#533483", dot: "#533483" },
     connected: { bg: "#0f9b8e15", text: "#0f9b8e", dot: "#0f9b8e" },
+    standalone: { bg: "#8b899415", text: "#8b8994", dot: "#8b8994" },
+    not_loaded: { bg: "#8b899415", text: "#8b8994", dot: "#8b8994" },
+    unreachable: { bg: "#e9456015", text: "#e94560", dot: "#e94560" },
+    degraded: { bg: "#f5a62315", text: "#f5a623", dot: "#f5a623" },
+    error: { bg: "#e9456015", text: "#e94560", dot: "#e94560" },
+    unknown: { bg: "#8b899415", text: "#8b8994", dot: "#8b8994" },
     offline: { bg: "#e9456015", text: "#e94560", dot: "#e94560" },
   };
 
@@ -141,7 +225,7 @@ export default function Health() {
                   className="text-xs font-medium uppercase tracking-wider"
                   style={{ color: statusStyle.text }}
                 >
-                  {comp.status}
+                  {comp.status.replace("_", " ")}
                 </span>
               </div>
               <p className="text-[10px] text-[#8b8994] mt-2">{comp.detail}</p>

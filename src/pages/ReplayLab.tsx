@@ -27,6 +27,11 @@ import {
   insertAlert,
   insertIncident,
   clearAllData,
+  startReplayApi,
+  pauseReplayApi,
+  stopReplayApi,
+  resetReplayApi,
+  USE_BACKEND,
 } from "@/services/api";
 import type { Alert, NetworkFlow } from "@/lib/types";
 
@@ -73,7 +78,7 @@ export default function ReplayLab() {
     (flow: NetworkFlow) => {
       const { alert, updatedFlow, detectionTimeMs } = analyzeFlow(flow);
 
-      // Insert flow directly into service store
+      // Insert flow directly into service store (syncs to backend if available)
       insertFlow(updatedFlow);
       flowsThisSecond.current++;
       sourceIpsRef.current.add(flow.sourceIp);
@@ -161,6 +166,15 @@ export default function ReplayLab() {
       measuredFps: 0,
     });
 
+    // Notify backend about replay start
+    if (USE_BACKEND) {
+      startReplayApi({
+        scenario: selectedScenario,
+        speed: targetRate,
+        dataset: "synthetic",
+      }).catch(() => {});
+    }
+
     const generator = getFlowGenerator(selectedScenario);
     const intervalMs = Math.max(1, Math.floor(1000 / targetRate));
 
@@ -185,12 +199,18 @@ export default function ReplayLab() {
     if (intervalRef.current) clearInterval(intervalRef.current);
     if (fpsTimerRef.current) clearInterval(fpsTimerRef.current);
     setReplayState({ status: "paused", measuredFlowsPerSecond: 0 });
+    if (USE_BACKEND) {
+      pauseReplayApi().catch(() => {});
+    }
   }, [setReplayState]);
 
   const stopReplay = useCallback(() => {
     if (intervalRef.current) clearInterval(intervalRef.current);
     if (fpsTimerRef.current) clearInterval(fpsTimerRef.current);
     setReplayState({ status: "stopped", measuredFlowsPerSecond: 0 });
+    if (USE_BACKEND) {
+      stopReplayApi().catch(() => {});
+    }
   }, [setReplayState]);
 
   const resumeReplay = useCallback(() => {
@@ -198,6 +218,15 @@ export default function ReplayLab() {
     const intervalMs = Math.max(1, Math.floor(1000 / targetRate));
 
     setReplayState({ status: "running" });
+
+    // Notify backend
+    if (USE_BACKEND) {
+      startReplayApi({
+        scenario: selectedScenario,
+        speed: targetRate,
+        dataset: "synthetic",
+      }).catch(() => {});
+    }
 
     flowsThisSecond.current = 0;
     intervalRef.current = setInterval(() => {
