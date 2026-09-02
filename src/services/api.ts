@@ -16,14 +16,12 @@
 // locally and fire-and-forget to the backend when available.
 // ═══════════════════════════════════════════════════════════════════
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useRef } from "react";
 import type {
   NetworkFlow,
   Alert,
   Incident,
   SystemMetrics,
-  ThreatClass,
-  Severity,
   DetectorInfo,
 } from "@/lib/types";
 

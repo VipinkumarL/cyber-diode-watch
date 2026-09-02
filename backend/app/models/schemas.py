@@ -11,7 +11,7 @@ from __future__ import annotations
 import enum
 from typing import Any, Literal, Optional, Union
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 # ── Enums ─────────────────────────────────────────────────────────
@@ -46,18 +46,48 @@ class DetectorStatus(str, enum.Enum):
 
 class NetworkFlow(BaseModel):
     """Network flow record — mirrors src/lib/types.ts NetworkFlow."""
-    flowId: str
-    timestamp: int  # epoch milliseconds
-    sourceIp: str
-    destinationIp: str
-    protocol: str
-    sourcePort: int
-    destinationPort: int
-    flowDuration: float
-    totalPackets: int
-    packetsPerSecond: float
-    bytesPerSecond: float
-    totalBytes: int
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [
+                {
+                    "flowId": "DEMO-NORMAL-001",
+                    "timestamp": 1725120000000,
+                    "sourceIp": "10.10.1.25",
+                    "destinationIp": "93.184.216.34",
+                    "protocol": "TCP",
+                    "sourcePort": 52144,
+                    "destinationPort": 443,
+                    "flowDuration": 12.4,
+                    "totalPackets": 96,
+                    "packetsPerSecond": 7.74,
+                    "bytesPerSecond": 38240.0,
+                    "totalBytes": 474176,
+                    "classification": "Normal",
+                    "confidence": 0.0,
+                    "severity": "INFO",
+                    "sourceEntropy": 2.1,
+                    "destinationConcentration": 0.18,
+                    "packetLengthMean": 512.0,
+                    "packetLengthStd": 84.5,
+                    "isSuspicious": False,
+                    "scenario": "normal",
+                }
+            ]
+        }
+    )
+
+    flowId: str = Field(..., examples=["DEMO-NORMAL-001"])
+    timestamp: int = Field(..., description="Epoch timestamp in milliseconds")
+    sourceIp: str = Field(..., examples=["10.10.1.25"])
+    destinationIp: str = Field(..., examples=["93.184.216.34"])
+    protocol: str = Field(..., examples=["TCP"])
+    sourcePort: int = Field(..., ge=0, le=65535)
+    destinationPort: int = Field(..., ge=0, le=65535)
+    flowDuration: float = Field(..., ge=0.0, description="Flow duration in seconds")
+    totalPackets: int = Field(..., ge=0)
+    packetsPerSecond: float = Field(..., ge=0.0)
+    bytesPerSecond: float = Field(..., ge=0.0)
+    totalBytes: int = Field(..., ge=0)
     classification: ThreatClass = ThreatClass.Normal
     confidence: float = 0.0
     severity: Severity = Severity.INFO
@@ -205,6 +235,38 @@ class StatisticsResponse(BaseModel):
 
 
 class PredictRequest(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [
+                {
+                    "flow": {
+                        "flowId": "DEMO-DDOS-METADATA-001",
+                        "timestamp": 1725120000000,
+                        "sourceIp": "10.10.4.18",
+                        "destinationIp": "10.10.8.20",
+                        "protocol": "UDP",
+                        "sourcePort": 49152,
+                        "destinationPort": 443,
+                        "flowDuration": 0.35,
+                        "totalPackets": 52000,
+                        "packetsPerSecond": 148571.43,
+                        "bytesPerSecond": 11800000.0,
+                        "totalBytes": 4130000,
+                        "classification": "Normal",
+                        "confidence": 0.0,
+                        "severity": "INFO",
+                        "sourceEntropy": 7.2,
+                        "destinationConcentration": 0.94,
+                        "packetLengthMean": 79.4,
+                        "packetLengthStd": 18.6,
+                        "isSuspicious": False,
+                        "scenario": "ddos",
+                    }
+                }
+            ]
+        }
+    )
+
     flow: NetworkFlow
 
 

@@ -2,6 +2,8 @@
 
 import pytest
 
+from demo_predict import demo_flows
+
 
 def test_predict_returns_flow(client, sample_flow):
     """POST /api/predict should return the flow."""
@@ -65,3 +67,40 @@ def test_predict_ddos_flow_has_alert(client):
     data = resp.json()
     assert data["alert"] is not None
     assert data["alert"]["threatClass"] == "DDoS"
+
+
+@pytest.mark.parametrize(
+    "scenario",
+    [
+        "normal",
+        "ddos",
+        "recon",
+        "c2",
+        "dns",
+        "encrypted_malware",
+        "exfil",
+    ],
+)
+def test_predict_demo_scenarios_return_valid_alert(client, scenario):
+    """Safe synthetic demo metadata should exercise the full predict contract."""
+    flow = demo_flows()[scenario]
+    resp = client.post("/api/predict", json={"flow": flow})
+    assert resp.status_code == 200
+
+    data = resp.json()
+    assert data["alert"] is not None
+    assert isinstance(data["updatedFlow"], dict)
+    assert isinstance(data["detectionTimeMs"], int)
+
+    alert = data["alert"]
+    for field in (
+        "threatClass",
+        "confidence",
+        "severity",
+        "detector",
+        "supportingEvidence",
+    ):
+        assert field in alert
+
+    assert alert["supportingEvidence"]
+    assert data["updatedFlow"]["flowId"] == flow["flowId"]

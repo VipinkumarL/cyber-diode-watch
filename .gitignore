@@ -1,4 +1,5 @@
 .env.local
+.venv/
 node_modules
 dist
 src/convex/_generated
@@ -9,6 +10,7 @@ backend/data/*.html
 backend/training/data/
 
 # Python cache
+**pycache**/
 __pycache__/
 *.pyc
 *.pyo

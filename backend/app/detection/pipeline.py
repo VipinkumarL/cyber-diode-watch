@@ -16,6 +16,7 @@ The ML prediction is included in the response alongside detector alerts.
 from __future__ import annotations
 
 import time
+import logging
 from typing import Optional
 
 from ..models.schemas import (
@@ -34,6 +35,8 @@ from .dga_dns import DGADnsDetector
 from .encrypted_malware import EncryptedMalwareDetector
 from .exfiltration import ExfiltrationDetector
 from .reconnaissance import ReconDetector
+
+logger = logging.getLogger(__name__)
 
 
 class DetectionPipeline:
@@ -83,8 +86,9 @@ class DetectionPipeline:
                         # Override detection latency with pipeline latency
                         alert.detectionLatencyMs = int((time.time() - start) * 1000)
                         alerts.append(alert)
-            except Exception:
+            except Exception as exc:
                 # Never let one detector crash the pipeline
+                logger.exception("Detector %s failed: %s", detector.__class__.__name__, exc)
                 continue
 
         return alerts
@@ -95,7 +99,11 @@ class DetectionPipeline:
         """
         Run ML inference on a flow. Returns None if model not loaded.
         """
-        return predict_flow(flow)
+        try:
+            return predict_flow(flow)
+        except Exception as exc:
+            logger.exception("ML prediction failed for flow %s: %s", flow.flowId, exc)
+            return None
 
     def ml_to_alert(
         self, prediction: MLPrediction, flow: NetworkFlow
@@ -190,7 +198,7 @@ class DetectionPipeline:
         if ml_attack_alerts:
             return max(
                 ml_attack_alerts,
-                key=lambda a: (-a.confidence, severity_order.get(a.severity, 5)),
+                key=lambda a: (a.confidence, -severity_order.get(a.severity, 5)),
             )
 
         # 3. Baseline detector alerts (non-ML, non-Normal)
@@ -201,7 +209,7 @@ class DetectionPipeline:
         if detector_alerts:
             return max(
                 detector_alerts,
-                key=lambda a: (-a.confidence, severity_order.get(a.severity, 5)),
+                key=lambda a: (a.confidence, -severity_order.get(a.severity, 5)),
             )
 
         # 4. ML "Normal" predictions (fallback)
@@ -212,7 +220,7 @@ class DetectionPipeline:
         # 5. Any remaining alert
         return max(
             alerts,
-            key=lambda a: (-a.confidence, severity_order.get(a.severity, 5)),
+            key=lambda a: (a.confidence, -severity_order.get(a.severity, 5)),
         )
 
     def get_all_detectors(self) -> list[DetectorInfo]:

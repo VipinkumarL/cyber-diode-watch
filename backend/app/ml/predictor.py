@@ -105,13 +105,15 @@ def predict_flow(flow: NetworkFlow) -> Optional[MLPrediction]:
 
     X_scaled = scaler.transform(X)
 
-    # Predict class and probabilities
-    predicted_idx = int(model.predict(X_scaled)[0])
+    # Predict probabilities once and derive the class from the highest score.
+    # This avoids a second RandomForest inference pass.
     probabilities = model.predict_proba(X_scaled)[0]
+    class_index = int(np.argmax(probabilities))
+    predicted_idx = int(model.classes_[class_index])
 
     # Map index to class name
     class_name = encoder.inverse_transform([predicted_idx])[0]
-    confidence = float(probabilities[predicted_idx])
+    confidence = float(probabilities[class_index])
 
     # Build probability dict
     class_names = encoder.classes_

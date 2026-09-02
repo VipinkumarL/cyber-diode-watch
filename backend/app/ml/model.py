@@ -84,6 +84,12 @@ def _try_load_model(model_dir: str, prefix: str) -> bool:
         _label_encoder = joblib.load(encoder_path)
         _model_info = joblib.load(info_path)
 
+        # The persisted RandomForest was trained with n_jobs=-1. In local
+        # Windows/sandboxed environments that can fail while spawning worker
+        # threads, so inference is forced to a single thread after loading.
+        if hasattr(_model, "n_jobs"):
+            _model.n_jobs = 1
+
         # Determine source
         _model_source = _model_info.get("model_source", "synthetic")
 

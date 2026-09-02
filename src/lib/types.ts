@@ -11,7 +11,7 @@ export type ThreatClass =
 
 export type Severity = "CRITICAL" | "HIGH" | "MEDIUM" | "LOW" | "INFO";
 
-export type DetectorStatus = "ACTIVE" | "DEMO" | "NOT_TRAINED" | "DISABLED";
+export type DetectorStatus = "ACTIVE" | "DEMO" | "NOT_TRAINED" | "NOT_IMPLEMENTED" | "DISABLED";
 
 export interface NetworkFlow {
   flowId: string;
@@ -50,7 +50,7 @@ export interface Alert {
   destinationPort: number;
   detector: string;
   detectionLatencyMs: number;
-  supportingEvidence: Record<string, number | string>;
+  supportingEvidence: Record<string, unknown>;
   description: string;
   status: string;
   scenario?: string;
@@ -68,7 +68,7 @@ export interface Incident {
   sourceIps: string[];
   destinationIps: string[];
   status: string;
-  evidence: Record<string, number | string>;
+  evidence: Record<string, unknown>;
   detector: string;
   detectionLatencyMs: number;
   scenario?: string;
