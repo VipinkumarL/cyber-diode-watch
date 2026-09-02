@@ -197,11 +197,16 @@ class TestFeatureExtraction:
         assert len(features) == len(FEATURE_NAMES)
 
     def test_feature_vector_values(self, normal_flow):
+        # CICIDS2017 feature order:
+        # 0:flow_duration 1:total_fwd_packets 2:total_backward_packets
+        # 3:total_bytes 4:flow_bytes_s 5:flow_packets_s
+        # 6:destination_port 7:source_port 8:packet_length_mean
+        # 9:packet_length_std 10:fwd_packet_length_mean 11:bwd_packet_length_mean
         features = flow_to_feature_vector(normal_flow)
-        assert features[0] == 5000.0  # flowDuration
-        assert features[4] == 60000  # totalBytes
-        assert features[5] == 49152.0  # sourcePort
-        assert features[6] == 80.0  # destinationPort
+        assert features[0] == 5000.0   # flowDuration
+        assert features[3] == 60000    # totalBytes
+        assert features[6] == 80.0     # destinationPort
+        assert features[7] == 49152.0  # sourcePort
 
     def test_feature_vector_handles_none_optionals(self):
         """Optional features should default to 0.0 when None."""
@@ -220,9 +225,11 @@ class TestFeatureExtraction:
             totalBytes=1000,
         )
         features = flow_to_feature_vector(flow)
-        # sourceEntropy (index 7) and destinationConcentration (index 8) default to 0.0
-        assert features[7] == 0.0  # sourceEntropy defaults to 0.0
-        assert features[8] == 0.0  # destinationConcentration defaults to 0.0
+        # packet_length_mean (8) and packet_length_std (9) default to 0.0 when None
+        assert features[8] == 0.0  # packet_length_mean defaults to 0.0
+        assert features[9] == 0.0  # packet_length_std defaults to 0.0
+        # bwd_packet_length_mean (11) is always 0.0 (unidirectional)
+        assert features[11] == 0.0
 
     def test_feature_order_consistency(self, _ensure_model):
         """Feature order must be consistent between training and inference."""

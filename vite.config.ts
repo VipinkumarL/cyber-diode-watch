@@ -94,5 +94,15 @@ export default defineConfig({
     hmr: {
       overlay: false,
     },
+    // Proxy /api and /ws requests to the FastAPI backend so the
+    // browser (which runs on a different host than the server)
+    // can reach the backend through the same Vite origin.
+    proxy: {
+      '/api': 'http://127.0.0.1:8000',
+      '/ws': {
+        target: 'ws://127.0.0.1:8000',
+        ws: true,
+      },
+    },
   },
 });

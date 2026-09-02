@@ -20,10 +20,12 @@ export default function Health() {
   const [backendHealth, setBackendHealth] = useState<{
     status: "ok" | "degraded" | "error" | "unreachable";
     modelLoaded: boolean;
+    modelSource: string;
     dbStatus: string;
   }>({
     status: "unreachable",
     modelLoaded: false,
+    modelSource: "",
     dbStatus: "unknown",
   });
 
@@ -33,6 +35,7 @@ export default function Health() {
       setBackendHealth({
         status: "unreachable",
         modelLoaded: false,
+        modelSource: "",
         dbStatus: "mock_in_memory",
       });
       return;
@@ -47,6 +50,7 @@ export default function Health() {
           setBackendHealth({
             status: res.status,
             modelLoaded: res.model_loaded,
+            modelSource: res.model_source ?? "",
             dbStatus: res.db_status,
           });
         }
@@ -55,6 +59,7 @@ export default function Health() {
           setBackendHealth({
             status: "unreachable",
             modelLoaded: false,
+            modelSource: "",
             dbStatus: "unknown",
           });
         }
@@ -104,7 +109,7 @@ export default function Health() {
       status: modelStatusLabel,
       icon: Brain,
       detail: backendHealth.modelLoaded
-        ? "DDoS-RF-v1 — Random Forest Classifier"
+        ? `${backendHealth.modelSource || "RF"} — Random Forest Classifier`
         : "No model loaded — interface ready",
       color: modelStatusLabel === "loaded" ? "#533483" : "#8b8994",
     },

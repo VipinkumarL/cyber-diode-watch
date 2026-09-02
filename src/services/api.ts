@@ -31,20 +31,22 @@ import type {
 
 /**
  * FastAPI backend base URL. Set via VITE_API_BASE_URL env var.
- * Defaults to the local FastAPI backend. Set to "" to run in mock-only mode.
+ * Defaults to empty string (""), which sends requests to the same origin.
+ * In development, the Vite dev server proxies /api and /ws to the backend.
  * Example: VITE_API_BASE_URL=http://127.0.0.1:8000
  */
-const API_BASE_URL: string = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8000";
+const API_BASE_URL: string = import.meta.env.VITE_API_BASE_URL ?? "";
 
 /**
  * WebSocket URL. Auto-derived from API_BASE_URL if not explicitly set.
+ * When API_BASE_URL is empty, uses relative WebSocket path (works with Vite proxy).
  * Example: ws://127.0.0.1:8000/ws/traffic
  */
 const WS_URL: string =
   import.meta.env.VITE_WS_URL ??
   (API_BASE_URL.length > 0
     ? API_BASE_URL.replace(/^http/, "ws") + "/ws/traffic"
-    : "");
+    : "/ws/traffic");
 
 /** Whether a live backend is configured */
 export const USE_BACKEND = API_BASE_URL.length > 0;
@@ -73,13 +75,23 @@ export class ApiError extends Error {
  * Returns parsed JSON of type T.
  */
 async function apiGet<T>(path: string, params?: Record<string, string>): Promise<T> {
-  const url = new URL(path, API_BASE_URL);
-  if (params) {
-    for (const [k, v] of Object.entries(params)) {
-      url.searchParams.set(k, v);
+  let urlStr: string;
+  if (API_BASE_URL) {
+    const url = new URL(path, API_BASE_URL);
+    if (params) {
+      for (const [k, v] of Object.entries(params)) {
+        url.searchParams.set(k, v);
+      }
     }
+    urlStr = url.toString();
+  } else {
+    // Relative URL — goes to the same origin (Vite proxy in dev)
+    const qs = params
+      ? "?" + new URLSearchParams(params).toString()
+      : "";
+    urlStr = path + qs;
   }
-  const res = await fetch(url.toString());
+  const res = await fetch(urlStr);
   if (!res.ok) {
     const body = await res.text().catch(() => "");
     throw new ApiError(`GET ${path} failed (${res.status}): ${body}`, res.status);
@@ -91,7 +103,8 @@ async function apiGet<T>(path: string, params?: Record<string, string>): Promise
  * Generic typed POST request to the FastAPI backend.
  */
 async function apiPost<T>(path: string, body?: unknown): Promise<T> {
-  const res = await fetch(`${API_BASE_URL}${path}`, {
+  const urlStr = API_BASE_URL ? `${API_BASE_URL}${path}` : path;
+  const res = await fetch(urlStr, {
     method: "POST",
     headers: body != null ? { "Content-Type": "application/json" } : undefined,
     body: body != null ? JSON.stringify(body) : undefined,
@@ -172,6 +185,7 @@ export interface StatisticsResponse {
 export interface HealthResponse {
   status: "ok" | "degraded" | "error";
   model_loaded: boolean;
+  model_source?: string;
   db_status: string;
 }
 
